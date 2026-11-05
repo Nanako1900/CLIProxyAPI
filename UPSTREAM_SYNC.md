@@ -37,10 +37,11 @@ To rotate the key, generate a new Ed25519 key, add the public key under **Settin
 
 - Default branch: `coolify`.
 - Merge commits enabled; squash and rebase disabled to retain upstream ancestry.
+- Automatically deleting merged PR head branches disabled. Never delete `main` after merging an upstream update PR.
 - Actions enabled and allowed to create pull requests. Individual jobs declare their required permissions.
 - Disable the inherited `agents-md-guard`, `translator-path-guard`, `auto-retarget-main-pr-to-dev`, `docker-image`, and release workflows in this fork. They enforce upstream-specific contribution or publishing rules and are not needed for deployment. Keep the inherited `pr-test-build` workflow enabled.
 - Do not add upstream Docker Hub publishing credentials. Coolify builds the source using `docker-compose.coolify.yml` and the upstream `Dockerfile`.
-- If upstream adds new workflows later, review their behavior and repository permissions before enabling them.
+- New upstream workflows can become active when imported by the SSH push. Review upstream workflow changes and their permissions; disabling existing inherited workflows does not disable future new files automatically.
 
 GitHub can disable scheduled workflows in public repositories after 60 days without repository activity. Check **Actions** if updates stop, and re-enable or manually run the workflow as needed.
 
