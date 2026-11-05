@@ -6,8 +6,11 @@ services:
     restart: unless-stopped
     expose:
       - "8317"
+    ports:
+      - "127.0.0.1:8317:8317"
     environment:
-      MANAGEMENT_PASSWORD: ${MANAGEMENT_PASSWORD:?Set MANAGEMENT_PASSWORD in Coolify}
+      # Coolify parses Compose during builds without runtime-only secrets.
+      MANAGEMENT_PASSWORD: ${MANAGEMENT_PASSWORD:-}
     volumes:
       - cpa-config:/CLIProxyAPI/runtime
       - cpa-auths:/root/.cli-proxy-api
@@ -22,6 +25,10 @@ services:
       - /bin/sh
       - -ec
       - |
+        if [ -z "$$(printf '%s' "$${MANAGEMENT_PASSWORD:-}" | tr -d '[:space:]')" ]; then
+          printf '%s\n' 'Set MANAGEMENT_PASSWORD in Coolify runtime environment.' >&2
+          exit 1
+        fi
         umask 077
         if [ ! -s /CLIProxyAPI/runtime/config.yaml ]; then
           config_tmp=$$(mktemp /CLIProxyAPI/runtime/.config.yaml.XXXXXX)
