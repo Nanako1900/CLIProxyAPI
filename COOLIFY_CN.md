@@ -32,6 +32,8 @@ Compose 使用仓库原有的 `Dockerfile`，需要下载 Go 依赖并编译项�
 MANAGEMENT_PASSWORD=替换为独立生成的强随机密码
 ```
 
+将 **Runtime** 设为可用，**Build time** 设为不可用，并保存变量。Coolify 构建时也会解析 Compose，但构建环境不包含仅运行时可用的密码；因此 Compose 允许构建阶段缺少此变量，容器启动时再检查。密码未设置、为空或只有空白字符时，容器会输出配置提示并退出，不会启动服务。
+
 可在自己的终端执行 `openssl rand -hex 32` 生成密码，再粘贴到 Coolify。不要将实际密码提交到仓库或填入 Compose 文件。此密码用于管理界面和管理 API，与调用模型的客户端 API key 不同。
 
 项目原生支持 `MANAGEMENT_PASSWORD`。非空时即使配置文件中的 `management.secret-key` 为空，也能通过该密码进行远程管理。修改这个环境变量后需要重新部署容器。不要在管理面板另设第二个管理密钥，以免产生多个有效入口。
@@ -57,7 +59,9 @@ https://api.example.com:8317
 
 这里的 `8317` 是 Coolify 代理转发到的容器内部端口。浏览器和客户端实际访问 **`https://api.example.com`**，不带 `:8317`。HTTPS 由 Coolify 代理处理，应用内部使用 HTTP。
 
-Compose 只声明 `expose`，不发布宿主机端口。无需增加 `ports:`，也无需将 `8317` 或 OAuth 回调端口暴露到公网。
+Compose 同时通过 `127.0.0.1:8317:8317` 将服务发布到服务器宿主机的回环地址。使用宿主机上的 Nginx、Caddy 等反向代理时，将整个域名转发到 `http://127.0.0.1:8317`；管理页为 `/management.html`，API 使用同一个端口。反向代理应支持 SSE 流式响应和 WebSocket。
+
+如果反向代理也运行在 Docker 容器中，需加入 CPA 所在的网络，并使用该网络中的 CPA 服务名或别名（例如 `http://cli-proxy-api:8317`）；此时代理容器内的 `127.0.0.1` 指向代理容器自身。使用 Coolify 自带代理时，仍按上面的域名配置操作。端口映射仅绑定宿主机回环地址，无需将 `8317` 或 OAuth 回调端口暴露到公网。修改端口映射后需重新部署容器。
 
 ## 4. 部署、登录并接入账号
 
@@ -108,6 +112,8 @@ curl --fail-with-body https://api.example.com/v1/models \
 
 常见排查方向：
 
+- **构建报 `MANAGEMENT_PASSWORD is missing a value`**：确认部署的提交已包含 `${MANAGEMENT_PASSWORD:-}` 和启动时密码检查，重新加载仓库中的 Compose 配置后部署。旧版 `${MANAGEMENT_PASSWORD:?…}` 会在构建阶段提前校验运行时密码。
+- **容器提示 `Set MANAGEMENT_PASSWORD in Coolify runtime environment.`**：在生产环境变量中设置非空密码，确认 Runtime 可用、保存后重新部署。
 - **502 / 网关不可达**：检查容器是否运行、域名是否选择 `cli-proxy-api` 服务、代理目标端口是否为 `8317`。
 - **401**：API 调用要使用客户端 API key；管理页面使用 `MANAGEMENT_PASSWORD`。
 - **管理界面 403**：核对运行时环境变量是否存在并重新部署。多次输错管理密码还会触发临时 IP 限制。
