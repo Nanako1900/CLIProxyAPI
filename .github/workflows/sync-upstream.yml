@@ -1,0 +1,83 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'Nanako1900/CLIProxyAPI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SYNC_SSH_KEY: ${{ secrets.UPSTREAM_SYNC_SSH_KEY }}
+    steps:
+      - name: Fast-forward main and open an update pull request
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$SYNC_SSH_KEY" ]; then
+            echo '::error::UPSTREAM_SYNC_SSH_KEY is missing. See UPSTREAM_SYNC.md.'
+            exit 1
+          fi
+
+          umask 077
+          sync_dir=$(mktemp -d "$RUNNER_TEMP/upstream-sync.XXXXXX")
+          trap 'rm -rf -- "$sync_dir"' EXIT
+          printf '%s\n' "$SYNC_SSH_KEY" > "$sync_dir/id_ed25519"
+          unset SYNC_SSH_KEY
+          gh api meta --jq '.ssh_keys[] | "github.com " + .' > "$sync_dir/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i '$sync_dir/id_ed25519' -o IdentitiesOnly=yes -o UserKnownHostsFile='$sync_dir/known_hosts' -o StrictHostKeyChecking=yes"
+
+          # Use a bare repository; never check out or execute upstream code with the key.
+          git init --quiet --bare "$sync_dir/repository.git"
+          cd "$sync_dir/repository.git"
+          git fetch --quiet --no-tags "https://github.com/$GH_REPO.git" \
+            refs/heads/main:refs/remotes/origin/main \
+            refs/heads/coolify:refs/remotes/origin/coolify
+          git fetch --quiet --no-tags https://github.com/router-for-me/CLIProxyAPI.git \
+            refs/heads/main:refs/remotes/upstream/main
+
+          if ! git merge-base --is-ancestor refs/remotes/origin/main refs/remotes/upstream/main; then
+            echo '::error::main has diverged from upstream. Resolve it manually; this workflow never force-pushes.'
+            exit 1
+          fi
+          git push "git@github.com:$GH_REPO.git" refs/remotes/upstream/main:refs/heads/main
+
+          upstream_sha=$(git rev-parse refs/remotes/upstream/main)
+          printf 'Upstream main: `%s`\n\n' "$upstream_sha" >> "$GITHUB_STEP_SUMMARY"
+          if git merge-base --is-ancestor refs/remotes/upstream/main refs/remotes/origin/coolify; then
+            echo 'The coolify branch already includes upstream main.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          pr_url=$(gh pr list --base coolify --head main --state open --json url,isCrossRepository \
+            --jq '[.[] | select(.isCrossRepository == false)][0].url // empty')
+          if [ -z "$pr_url" ]; then
+            cat > "$sync_dir/pr-body.md" <<'BODY'
+          Update the `coolify` development and deployment branch with upstream `main`.
+
+          - Review the changes. Do not use **Resolve conflicts** or **Update branch** on this PR: its head is the pristine `main` mirror.
+          - If there are conflicts, branch from `coolify`, merge `main` into that integration branch, resolve conflicts there, and open an integration-branch PR into `coolify`. See `UPSTREAM_SYNC.md`.
+          - Run the build check; GitHub may require **Approve workflows to run** for this bot-created PR.
+          - Use **Create a merge commit**. Squash or rebase would lose the shared merge ancestry used by future syncs.
+          - If Coolify automatic deployments are enabled, merging this PR will deploy the updated `coolify` branch.
+
+          This PR is maintained by `.github/workflows/sync-upstream.yml`; the workflow never force-pushes or merges into `coolify` automatically.
+          BODY
+            pr_url=$(gh pr create --base coolify --head main \
+              --title 'chore: merge upstream updates into coolify' \
+              --body-file "$sync_dir/pr-body.md")
+          fi
+          printf 'Update pull request: %s\n' "$pr_url" >> "$GITHUB_STEP_SUMMARY"

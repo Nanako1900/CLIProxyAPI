@@ -1,0 +1,68 @@
+services:
+  cli-proxy-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8317"
+    environment:
+      MANAGEMENT_PASSWORD: ${MANAGEMENT_PASSWORD:?Set MANAGEMENT_PASSWORD in Coolify}
+    volumes:
+      - cpa-config:/CLIProxyAPI/runtime
+      - cpa-auths:/root/.cli-proxy-api
+      - cpa-logs:/CLIProxyAPI/logs
+      - cpa-plugins:/CLIProxyAPI/plugins
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        umask 077
+        if [ ! -s /CLIProxyAPI/runtime/config.yaml ]; then
+          config_tmp=$$(mktemp /CLIProxyAPI/runtime/.config.yaml.XXXXXX)
+          trap 'rm -f "$$config_tmp"' EXIT
+          trap 'exit 1' HUP INT TERM
+          client_key=$$(od -v -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+          test "$${#client_key}" -eq 64
+          printf '%s\n' \
+            'config-version: 8' \
+            'server:' \
+            '  host: ""' \
+            '  port: 8317' \
+            '  tls:' \
+            '    enable: false' \
+            'management:' \
+            '  allow-remote: true' \
+            '  secret-key: ""' \
+            '  disable-control-panel: false' \
+            'access:' \
+            '  api-keys:' \
+            "    - \"$$client_key\"" \
+            'oauth:' \
+            '  auth-dir: "/root/.cli-proxy-api"' \
+            'observability:' \
+            '  logs:' \
+            '    debug: false' \
+            '    logging-to-file: false' \
+            '    request-log: false' \
+            '    logs-max-total-size-mb: 100' \
+            '    error-logs-max-files: 10' \
+            'plugins:' \
+            '  enabled: false' \
+            '  dir: "/CLIProxyAPI/plugins"' \
+            > "$$config_tmp"
+          mv "$$config_tmp" /CLIProxyAPI/runtime/config.yaml
+          trap - EXIT HUP INT TERM
+        fi
+        exec /CLIProxyAPI/CLIProxyAPI --config /CLIProxyAPI/runtime/config.yaml
+
+volumes:
+  cpa-config:
+  cpa-auths:
+  cpa-logs:
+  cpa-plugins:
