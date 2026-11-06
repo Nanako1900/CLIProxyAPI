@@ -336,7 +336,12 @@ func codexHeaderDefaults(cfg *config.Config, auth *cliproxyauth.Auth) (string, s
 	if cfg == nil || auth == nil || codexAuthUsesAPIKey(auth) {
 		return "", ""
 	}
-	return strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent), strings.TrimSpace(cfg.CodexHeaderDefaults.BetaFeatures)
+	userAgent := strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent)
+	if strings.EqualFold(userAgent, "auto") {
+		// Build the native identity first; release tracking runs at the final boundary.
+		userAgent = ""
+	}
+	return userAgent, strings.TrimSpace(cfg.CodexHeaderDefaults.BetaFeatures)
 }
 
 func ensureHeaderWithPriority(target http.Header, source http.Header, key, configValue, fallbackValue string) {

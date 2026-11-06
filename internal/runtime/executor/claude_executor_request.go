@@ -1443,6 +1443,7 @@ func applyClaudeHeadersWithNativeProfile(
 		} else if stream {
 			restoreCallerTransport()
 		}
+		helps.ApplyConfiguredUserAgent(r.Context(), r.Header, cfg, auth, "claude", incomingHeaders)
 		return nil
 	}
 
@@ -1600,6 +1601,7 @@ func applyClaudeHeadersWithNativeProfile(
 		// silently disable event negotiation.
 		applyTransportNegotiation()
 	}
+	helps.ApplyConfiguredUserAgent(r.Context(), r.Header, cfg, auth, "claude", incomingHeaders)
 	return nil
 }
 

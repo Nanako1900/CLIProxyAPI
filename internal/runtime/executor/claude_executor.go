@@ -542,6 +542,7 @@ func (e *ClaudeExecutor) PrepareRequest(req *http.Request, auth *cliproxyauth.Au
 		attrs = auth.Attributes
 	}
 	util.ApplyCustomHeadersFromAttrs(req, attrs)
+	helps.ApplyConfiguredUserAgent(req.Context(), req.Header, e.cfg, auth, "claude", nil)
 	return nil
 }
 

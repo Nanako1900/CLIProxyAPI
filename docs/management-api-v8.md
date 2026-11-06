@@ -40,6 +40,8 @@ the corresponding group value. Legacy field names are rejected by v8 writes.
 | `/config/api-keys` | All upstream provider groups. |
 | `/config/api-keys/codex` | Codex upstream groups. |
 | `/config/client/codex/optimize-multi-agent-v2` | Boolean, default `false`; applies to Codex clients across OAuth and API-key routes. |
+| `/config/oauth/providers/codex/header-defaults/user-agent` | Final Codex OAuth/file-backed User-Agent, `"auto"`, or `""` for native behavior. |
+| `/config/upstream/claude/header-defaults/user-agent` | Final shared Claude User-Agent, `"auto"`, or `""` for native behavior. |
 | `/config/observability/logs/debug` | A boolean, for example `true`. |
 | `/config/routing/retry/request-retry` | A number, for example `0`. |
 | `/config/plugins/configs/<id>` | A plugin configuration object. |
@@ -63,6 +65,25 @@ The Home-owned revision fields
 `credentials.concurrency.lifecycle-config-revision`,
 `credentials.concurrency.observation-barrier-revision`, and `plugins.auth-revision`
 cannot be changed through these endpoints.
+
+### Native User-Agent settings
+
+The management panel exposes both User-Agent defaults under **Configuration →
+Advanced → Default headers**. To enable stable client version tracking without
+plugins, send `PATCH /v8/management/config`:
+
+```json
+{
+  "oauth": {"providers": {"codex": {"header-defaults": {"user-agent": "auto"}}}},
+  "upstream": {"claude": {"header-defaults": {"user-agent": "auto"}}}
+}
+```
+
+Explicit strings override native/model User-Agent rules. Credential-specific
+`headers.User-Agent` takes precedence and also accepts `auto`. The Codex OAuth
+default does not apply to API-key groups. Values containing control characters,
+non-ASCII bytes, or more than 1024 bytes are rejected before saving. See
+[User-Agent settings](user-agent-settings.md) for refresh behavior and deployment.
 
 ### Codex multi-agent configuration migration
 

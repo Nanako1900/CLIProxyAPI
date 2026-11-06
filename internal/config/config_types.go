@@ -156,6 +156,8 @@ func (c ClaudeConfig) SessionDatePinRetention() time.Duration {
 }
 
 // ClaudeHeaderDefaults configures the measured Claude Code software baseline.
+// A nonempty UserAgent is a final override (or "auto" for stable client version
+// tracking); credential User-Agent headers take precedence. Empty keeps native behavior.
 // Verified native requests preserve their entrypoint and software shape only when their
 // Claude Code, package, and runtime versions exactly match this baseline; unmeasured
 // versions use the configured values. Timeout remains a fallback. Stabilized profiles
@@ -188,9 +190,10 @@ const (
 	ClaudeClientRequestIDPassthrough = "passthrough"
 )
 
-// CodexHeaderDefaults configures fallback header values injected into Codex
-// model requests for OAuth/file-backed auth when the client omits them.
-// UserAgent applies to HTTP and websocket requests; BetaFeatures only applies to websockets.
+// CodexHeaderDefaults configures headers for OAuth/file-backed model requests.
+// UserAgent is a final HTTP/websocket override, or "auto" for stable client version
+// tracking. Credential User-Agent headers take precedence; empty keeps native behavior.
+// BetaFeatures is a fallback for websocket requests only. API-key auth is excluded.
 type CodexHeaderDefaults struct {
 	UserAgent    string `yaml:"user-agent" json:"user-agent"`
 	BetaFeatures string `yaml:"beta-features" json:"beta-features"`

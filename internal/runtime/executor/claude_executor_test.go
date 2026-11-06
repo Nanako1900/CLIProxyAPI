@@ -607,7 +607,7 @@ func TestApplyClaudeHeaders_DisableDeviceProfileStabilization(t *testing.T) {
 		"X-Stainless-Arch":            []string{"x64"},
 	})
 	applyClaudeHeaders(firstReq, auth, "key-disable-stability", false, nil, nil, cfg, nil, true)
-	assertClaudeFingerprint(t, firstReq.Header, "claude-cli/2.1.62 (external, cli)", "0.70.0", "v22.0.0", "Linux", "x64")
+	assertClaudeFingerprint(t, firstReq.Header, cfg.ClaudeHeaderDefaults.UserAgent, "0.70.0", "v22.0.0", "Linux", "x64")
 
 	thirdPartyReq := newClaudeHeaderTestRequest(t, http.Header{
 		"User-Agent":                  []string{"lobe-chat/1.0"},
@@ -1572,7 +1572,7 @@ func TestClaudeExecutor_CloakModeNeverUsesConfiguredHeaderDefaultsBaseline(t *te
 	if errExecute != nil {
 		t.Fatalf("Execute() plausible headers error = %v", errExecute)
 	}
-	assertClaudeFingerprint(t, seenHeaders, callerUA, "0.128.0", "v26.5.0", "MacOS", "arm64")
+	assertClaudeFingerprint(t, seenHeaders, cfg.ClaudeHeaderDefaults.UserAgent, "0.128.0", "v26.5.0", "MacOS", "arm64")
 
 	incomingFallback := incomingPlausible.Clone()
 	incomingFallback.Set("X-Stainless-Package-Version", "0.80.0")
@@ -1588,7 +1588,7 @@ func TestClaudeExecutor_CloakModeNeverUsesConfiguredHeaderDefaultsBaseline(t *te
 	if errExecute != nil {
 		t.Fatalf("Execute() fallback headers error = %v", errExecute)
 	}
-	assertClaudeFingerprint(t, seenHeaders, callerUA, "0.95.0", "v26.4.0", "MacOS", "arm64")
+	assertClaudeFingerprint(t, seenHeaders, cfg.ClaudeHeaderDefaults.UserAgent, "0.95.0", "v26.4.0", "MacOS", "arm64")
 }
 
 func TestClaudeDeviceProfileStabilizationEnabled_DefaultFalse(t *testing.T) {

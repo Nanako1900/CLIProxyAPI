@@ -511,6 +511,11 @@ upstream:
     # enabled, OS/arch are pinned to the values below and cached profiles remain constrained to
     # the same exact software baseline rather than learning newer client versions (unless the
     # credential resolves to cloak_mode: never, which preserves the confirmed caller's headers).
+    # User-Agent is a final override, including confirmed native callers. Set it to "auto"
+    # to follow the official stable Claude Code version, or leave it empty for native behavior.
+    # A credential's headers.User-Agent takes precedence. Auto refreshes at startup, when
+    # enabled, and every 3 hours; it keeps the cached version on failure and does not update
+    # SDK/Node/OS headers. See docs/user-agent-settings.md for scope and deployment details.
     # header-defaults:
     #   user-agent: "claude-cli/2.1.280 (external, cli)"
     #   package-version: "0.112.1"
@@ -1168,9 +1173,12 @@ oauth:
       signin-with-chatgpt-identifier: "CLIProxyAPI"
 
       # Default headers for Codex OAuth model requests.
-      # These are used only for file-backed/OAuth Codex requests when the client
-      # does not send the header. `user-agent` applies to HTTP and websocket requests;
-      # `beta-features` only applies to websocket requests. They do not apply to api-keys.codex entries.
+      # Only file-backed/OAuth requests use these defaults. `user-agent` is a final override
+      # for HTTP and websocket requests; credential headers.User-Agent takes precedence.
+      # Use "auto" to track the official stable Codex version (startup, when enabled, every
+      # 3 hours), or leave it empty for native behavior. Lookup failures keep the cached UA.
+      # `beta-features` is a websocket fallback. For api-keys.codex use headers.User-Agent
+      # on the provider group or key instead. See docs/user-agent-settings.md.
       # header-defaults:
       #   user-agent: "codex_cli_rs/0.114.0 (Mac OS 14.2.0; x86_64) vscode/1.111.0"
       #   beta-features: "multi_agent"

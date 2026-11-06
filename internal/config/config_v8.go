@@ -283,6 +283,9 @@ func (cfg *Config) UnmarshalYAML(node *yaml.Node) error {
 	if errValidate := decoded.Models.Validate(); errValidate != nil {
 		return errValidate
 	}
+	if errValidate := (*Config)(&decoded).ValidateUserAgents(); errValidate != nil {
+		return errValidate
+	}
 	*cfg = Config(decoded)
 	cfg.SyncServerResponseCompression()
 	cfg.OAuthOnlyFields = nil
@@ -974,5 +977,8 @@ func ValidateV8Config(data []byte) error {
 	if errDecode := decoder.Decode(&cfg); errDecode != nil {
 		return errDecode
 	}
-	return cfg.Models.Validate()
+	if errValidate := cfg.Models.Validate(); errValidate != nil {
+		return errValidate
+	}
+	return (*Config)(&cfg).ValidateUserAgents()
 }

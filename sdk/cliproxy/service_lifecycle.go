@@ -55,6 +55,11 @@ func (s *Service) Run(ctx context.Context) error {
 	}()
 
 	s.startModelCatalogUpdaters(ctx)
+	s.cfgMu.Lock()
+	s.clientUserAgentUpdates = make(chan struct{}, 1)
+	clientUserAgentUpdates := s.clientUserAgentUpdates
+	s.cfgMu.Unlock()
+	go helps.RunClientUserAgentUpdater(ctx, s.currentConfig, clientUserAgentUpdates)
 
 	usage.StartDefault(ctx)
 	cfg := s.currentConfig()
