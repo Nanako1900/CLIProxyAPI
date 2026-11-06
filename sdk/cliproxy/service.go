@@ -32,6 +32,8 @@ type Service struct {
 
 	// cfgMu protects concurrent access to the configuration.
 	cfgMu sync.RWMutex
+	// clientUserAgentUpdates wakes the opt-in version updater after config changes.
+	clientUserAgentUpdates chan struct{}
 
 	// configUpdateMu serializes config updates across watcher + home.
 	configUpdateMu sync.Mutex

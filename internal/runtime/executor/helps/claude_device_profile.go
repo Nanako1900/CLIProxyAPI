@@ -138,8 +138,13 @@ func defaultClaudeDeviceProfile(cfg *config.Config) ClaudeDeviceProfile {
 		hd = cfg.ClaudeHeaderDefaults
 	}
 
+	userAgent := hd.UserAgent
+	if strings.EqualFold(strings.TrimSpace(userAgent), "auto") {
+		// Release tracking changes the final header, not the measured native profile.
+		userAgent = ""
+	}
 	profile := ClaudeDeviceProfile{
-		UserAgent:      hdrDefault(hd.UserAgent, defaultClaudeFingerprintUserAgent),
+		UserAgent:      hdrDefault(userAgent, defaultClaudeFingerprintUserAgent),
 		PackageVersion: hdrDefault(hd.PackageVersion, defaultClaudeFingerprintPackageVersion),
 		RuntimeVersion: hdrDefault(hd.RuntimeVersion, defaultClaudeFingerprintRuntimeVersion),
 		OS:             hdrDefault(hd.OS, defaultClaudeFingerprintOS),

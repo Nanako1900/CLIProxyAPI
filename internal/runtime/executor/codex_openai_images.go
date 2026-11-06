@@ -120,6 +120,7 @@ func (e *CodexExecutor) executeOpenAIImage(ctx context.Context, auth *cliproxyau
 	prepareHeaders := func(request *http.Request) {
 		applyCodexHeaders(request, auth, apiKey, true, e.cfg, opts.Headers)
 		applyModelHeaderOverrides(request.Header, mainModel)
+		helps.ApplyConfiguredUserAgent(request.Context(), request.Header, e.cfg, auth, "codex", opts.Headers)
 		alignCodexContentEncoding(request)
 	}
 	prepareHeaders(httpReq)
@@ -230,6 +231,7 @@ func (e *CodexExecutor) executeOpenAIImageStream(ctx context.Context, auth *clip
 	prepareHeaders := func(request *http.Request) {
 		applyCodexHeaders(request, auth, apiKey, true, e.cfg, opts.Headers)
 		applyModelHeaderOverrides(request.Header, mainModel)
+		helps.ApplyConfiguredUserAgent(request.Context(), request.Header, e.cfg, auth, "codex", opts.Headers)
 		alignCodexContentEncoding(request)
 	}
 	prepareHeaders(httpReq)
@@ -376,6 +378,7 @@ func (e *CodexExecutor) executeDirectOpenAIImage(ctx context.Context, auth *clip
 	prepareHeaders := func(request *http.Request) {
 		applyCodexDirectImageHeaders(request, auth, apiKey, false, e.cfg, opts.Headers)
 		applyModelHeaderOverrides(request.Header, model)
+		helps.ApplyConfiguredUserAgent(request.Context(), request.Header, e.cfg, auth, "codex", opts.Headers)
 		if contentType != "" {
 			request.Header.Set("Content-Type", contentType)
 		}
@@ -449,6 +452,7 @@ func (e *CodexExecutor) executeDirectOpenAIImageStream(ctx context.Context, auth
 	prepareHeaders := func(request *http.Request) {
 		applyCodexDirectImageHeaders(request, auth, apiKey, true, e.cfg, opts.Headers)
 		applyModelHeaderOverrides(request.Header, model)
+		helps.ApplyConfiguredUserAgent(request.Context(), request.Header, e.cfg, auth, "codex", opts.Headers)
 		if contentType != "" {
 			request.Header.Set("Content-Type", contentType)
 		}

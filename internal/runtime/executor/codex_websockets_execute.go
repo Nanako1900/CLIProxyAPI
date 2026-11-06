@@ -125,6 +125,7 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 	wsHeaders = applyCodexWebsocketHeaders(ctx, wsHeaders, auth, apiKey, e.cfg, nativeRequest, opts.Headers)
 	applyCodexRoutingHint(ctx, wsHeaders, auth, upstreamModel, body, opts.Headers)
 	applyModelHeaderOverrides(wsHeaders, upstreamModel)
+	helps.ApplyConfiguredUserAgent(ctx, wsHeaders, e.cfg, auth, "codex", opts.Headers)
 
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
