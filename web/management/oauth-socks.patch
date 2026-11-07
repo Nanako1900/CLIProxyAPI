@@ -5,17 +5,18 @@ diff --git a/src/services/api/oauth.ts b/src/services/api/oauth.ts
   */
 
  import { apiClient } from './client';
-+import { validateOAuthSocksProxy } from '@/features/oauth/socksProxy';
++import { validateOAuthLoginProxy } from '@/features/oauth/socksProxy';
  import {
    isManagementOAuthProviderKey,
    normalizeManagementOAuthProviderKey,
-@@ -50,16 +51,19 @@
+@@ -50,16 +51,20 @@
    startSiwcBind: (name: string, signal?: AbortSignal) =>
      apiClient.post<SiwcBindResponse>('/oauth/siwc/bind', { name }, signal ? { signal } : undefined),
 
 -  startAuth: (provider: string, signal?: AbortSignal) => {
-+  startAuth: (provider: string, proxyUrl: string, signal?: AbortSignal) => {
-+    if (validateOAuthSocksProxy(proxyUrl)) throw new Error('A valid SOCKS proxy is required');
++  startAuth: (provider: string, proxyUrl = '', signal?: AbortSignal) => {
++    if (validateOAuthLoginProxy(provider, proxyUrl))
++      throw new Error('A valid SOCKS proxy is required');
      const providerKey = normalizeProviderForManagementPath(provider);
 -    const params: Record<string, string | boolean> = { provider: providerKey };
 -    if (WEBUI_SUPPORTED.has(providerKey)) {
@@ -27,8 +28,8 @@ diff --git a/src/services/api/oauth.ts b/src/services/api/oauth.ts
 -    });
 +    const body: Record<string, string | boolean> = {
 +      provider: providerKey,
-+      proxy_url: proxyUrl.trim(),
 +    };
++    if (proxyUrl.trim()) body.proxy_url = proxyUrl.trim();
 +    if (WEBUI_SUPPORTED.has(providerKey)) body.is_webui = true;
 +    return apiClient.post<OAuthStartResponse>(
 +      '/oauth/auth-url',
@@ -114,20 +115,21 @@ diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hook
  import { createOAuthAttempts, type OAuthAttempt } from '../oauthAttempts';
  import { validateDevinCallback } from '../devinOAuth';
  import { resolveCallbackUrl } from '../callbackUrl';
-+import { validateOAuthSocksProxy, type OAuthProxyValidation } from '../socksProxy';
++import { validateOAuthLoginProxy, type OAuthProxyValidation } from '../socksProxy';
  import {
    buildPluginOAuthProviderCards,
    type OAuthProviderCard,
-@@ -14,6 +15,8 @@
+@@ -14,6 +15,9 @@
  } from '../providers';
 
  export interface ProviderFlowState {
 +  proxyUrl?: string;
++  proxyBound?: boolean;
 +  proxyValidation?: OAuthProxyValidation;
    url?: string;
    userCode?: string;
    state?: string;
-@@ -26,16 +29,13 @@
+@@ -26,16 +30,13 @@
    callbackSubmitting?: boolean;
    callbackStatus?: 'success' | 'error';
    callbackError?: string;
@@ -146,7 +148,7 @@ diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hook
    isFocused: (provider: string) => boolean;
  }
 
-@@ -50,7 +50,7 @@
+@@ -50,7 +51,7 @@
    return typeof error.status === 'number' ? error.status : undefined;
  }
 
@@ -155,7 +157,7 @@ diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hook
  export function usePluginOAuthProviders(apiBase: string) {
    const [pluginProviders, setPluginProviders] = useState<PluginOAuthProviderCard[]>([]);
 
-@@ -73,15 +73,12 @@
+@@ -73,15 +74,12 @@
    return pluginProviders;
  }
 
@@ -173,7 +175,7 @@ diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hook
    const [addedCount, setAddedCount] = useState(0);
    const recordCredentialAdded = useCallback(() => setAddedCount((count) => count + 1), []);
    const attempts = useRef(
-@@ -122,7 +119,7 @@
+@@ -122,7 +120,7 @@
        : t(getAuthKey(provider, suffix));
    };
 
@@ -182,7 +184,7 @@ diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hook
    const notify = (provider: string, message: string, type: 'success' | 'error' | 'warning') => {
      if (!isFocused(provider)) showNotification(message, type);
    };
-@@ -147,6 +144,8 @@
+@@ -147,6 +145,8 @@
        url: undefined,
        state: undefined,
        status: 'success',
@@ -191,7 +193,7 @@ diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hook
        error: undefined,
        polling: false,
        cancelling: false,
-@@ -157,7 +156,7 @@
+@@ -157,7 +157,7 @@
        callbackError: undefined,
        callbackValidation: undefined,
      });
@@ -200,7 +202,7 @@ diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hook
      resetAttempt.schedule(() => {
        if (!isFocused(provider)) resetProviderAttempt(provider);
      }, SUCCESS_RESET_DELAY_MS);
-@@ -243,7 +242,26 @@
+@@ -243,7 +243,26 @@
      startPolling(provider, state, attempt);
    };
 
@@ -218,7 +220,7 @@ diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hook
 +      return;
 +    }
 +    const proxyUrl = states[provider]?.proxyUrl?.trim() ?? '';
-+    const proxyValidation = validateOAuthSocksProxy(proxyUrl);
++    const proxyValidation = validateOAuthLoginProxy(provider, proxyUrl);
 +    if (proxyValidation) {
 +      updateProviderState(provider, { proxyValidation });
 +      return;
@@ -227,7 +229,15 @@ diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hook
      // A network error can stop polling while the server is still waiting. Require
      // explicit cancellation before replacing that Devin session.
      if (provider === 'devin' && states[provider]?.state) return;
-@@ -264,7 +282,7 @@
+@@ -251,6 +270,7 @@
+     updateProviderState(provider, {
+       url: undefined,
+       userCode: undefined,
++      proxyBound: Boolean(proxyUrl),
+       state: undefined,
+       status: 'waiting',
+       polling: true,
+@@ -264,7 +284,7 @@
        callbackSubmitting: false,
      });
      try {
@@ -236,7 +246,7 @@ diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hook
        if (!attempt.isCurrent()) return;
        if (!res.state) {
          const message = t('auth_login.missing_state');
-@@ -384,7 +402,7 @@
+@@ -384,7 +404,7 @@
      }
    };
 
@@ -245,7 +255,7 @@ diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hook
    const dismissSuccess = (provider: string) => {
      if (states[provider]?.status === 'success') resetProviderAttempt(provider);
    };
-@@ -395,6 +413,7 @@
+@@ -395,6 +415,7 @@
      recordCredentialAdded,
      providerText,
      startAuth,
@@ -256,15 +266,16 @@ diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hook
 diff --git a/src/features/oauth/components/OAuthFlowDialog.tsx b/src/features/oauth/components/OAuthFlowDialog.tsx
 --- a/src/features/oauth/components/OAuthFlowDialog.tsx
 +++ b/src/features/oauth/components/OAuthFlowDialog.tsx
-@@ -1,6 +1,7 @@
+@@ -1,6 +1,8 @@
  import { useId, type ReactNode } from 'react';
  import { useTranslation } from 'react-i18next';
  import { Modal } from '@/components/ui/Modal';
 +import { OAuthProxyInput } from './OAuthProxyInput';
++import { requiresOAuthSocksProxy } from '../socksProxy';
  import { IconExternalLink, IconLoader2 } from '@/components/ui/icons';
  import type { ProviderFlowState } from '../hooks/useOAuthFlows';
  import { resolveFlowView, splitAuthUrl, type FlowView } from '../flowView';
-@@ -33,12 +34,13 @@
+@@ -33,12 +35,13 @@
    providerId: string;
    heading: DialogHeading;
    state: ProviderFlowState;
@@ -280,7 +291,15 @@ diff --git a/src/features/oauth/components/OAuthFlowDialog.tsx b/src/features/oa
    onCancel: () => void;
    onCallbackChange: (value: string) => void;
    onCallbackSubmit: () => void;
-@@ -104,11 +106,21 @@
+@@ -93,6 +96,7 @@
+ function FlowBody(props: OAuthFlowDialogProps & { view: Exclude<FlowView, 'success'> }) {
+   const { t } = useTranslation();
+   const { view, providerId, state, text, onStart } = props;
++  const proxyRequired = requiresOAuthSocksProxy(providerId);
+   const isDevin = providerId === 'devin';
+
+   if (view !== 'flow') {
+@@ -104,11 +108,28 @@
              {text('oauth_status_error')} {state.error || ''}
            </div>
          )}
@@ -295,26 +314,33 @@ diff --git a/src/features/oauth/components/OAuthFlowDialog.tsx b/src/features/oa
 +        >
 +          <OAuthProxyInput
 +            value={state.proxyUrl ?? ''}
++            required={proxyRequired}
 +            error={state.proxyValidation}
 +            onChange={props.onProxyChange}
 +          />
-+          <button type="submit" className={styles.primary} disabled={!state.proxyUrl?.trim()}>
-+            {t('auth_login.socks_start')}
++          <button
++            type="submit"
++            className={styles.primary}
++            disabled={proxyRequired && !state.proxyUrl?.trim()}
++          >
++            {proxyRequired || state.proxyUrl?.trim()
++              ? t('auth_login.socks_start')
++              : text('oauth_button')}
            </button>
 -        </div>
 +        </form>
        </div>
      );
    }
-@@ -126,6 +138,7 @@
+@@ -126,6 +147,7 @@
            {t('auth_login.devin_oauth_cancel_error')} {state.cancelError}
          </div>
        )}
-+      <p className={styles.hint}>{t('auth_login.socks_session_hint')}</p>
++      {state.proxyBound && <p className={styles.hint}>{t('auth_login.socks_session_hint')}</p>}
        <ol className={styles.steps}>
          <OpenStep {...props} />
          {state.userCode && (
-@@ -304,7 +317,7 @@
+@@ -304,7 +326,7 @@
    const isDevin = providerId === 'devin';
    const failed = state.status === 'error';
    const generating = !failed && !state.url;
@@ -323,21 +349,32 @@ diff --git a/src/features/oauth/components/OAuthFlowDialog.tsx b/src/features/oa
    const canCancel = isDevin && Boolean(state.state);
 
    return (
-@@ -356,6 +369,7 @@
+@@ -346,7 +368,7 @@
+   );
+ }
+
+-function SuccessView({ text, onStart, onViewAuthFiles }: OAuthFlowDialogProps) {
++function SuccessView({ state, text, onStart, onViewAuthFiles }: OAuthFlowDialogProps) {
+   const { t } = useTranslation();
+   return (
+     <div className={styles.result} role="status">
+@@ -356,6 +378,7 @@
        </svg>
        <div className={styles.resultTitle}>{text('oauth_status_success')}</div>
        <p className={styles.resultHint}>{t('auth_login.success_saved_hint')}</p>
-+      <p className={styles.resultHint}>{t('auth_login.socks_saved_hint')}</p>
++      {state.proxyBound && <p className={styles.resultHint}>{t('auth_login.socks_saved_hint')}</p>}
        <div className={styles.resultActions}>
          <button type="button" className={styles.secondary} onClick={onViewAuthFiles}>
            {t('auth_login.view_auth_files')}
 diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
 --- a/src/i18n/locales/en.json
 +++ b/src/i18n/locales/en.json
-@@ -820,6 +820,13 @@
+@@ -820,6 +820,15 @@
      "upgrade_required_desc": "The current server does not support the OAuth model aliases API. Please upgrade to the latest CLI Proxy API (CPA) version."
    },
    "auth_login": {
++    "socks_optional_label": "Account SOCKS proxy (optional for plugins)",
++    "socks_optional_hint": "Leave empty to use the plugin or global network settings. If supplied, CPA uses this SOCKS proxy for login and saves it with the account.",
 +    "socks_label": "Account SOCKS proxy (required)",
 +    "socks_hint": "Paste a socks5:// or socks5h:// address with a port. CPA uses it for OAuth and saves it with the account. Your browser must be configured separately to use the same exit IP.",
 +    "socks_required": "Paste a SOCKS proxy before starting login.",
@@ -351,10 +388,12 @@ diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
 diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
 --- a/src/i18n/locales/zh-CN.json
 +++ b/src/i18n/locales/zh-CN.json
-@@ -818,6 +818,13 @@
+@@ -818,6 +818,15 @@
      "upgrade_required_desc": "当前服务器版本不支持 OAuth 模型别名功能，请升级到最新版本的 CPA（CLI Proxy API）后重试。"
    },
    "auth_login": {
++    "socks_optional_label": "账号 SOCKS 代理（插件选填）",
++    "socks_optional_hint": "留空使用插件或全局网络设置。填写后，CPA 会使用此 SOCKS 完成登录，并自动保存到账号。",
 +    "socks_label": "账号 SOCKS 代理（必填）",
 +    "socks_hint": "粘贴带端口的 socks5:// 或 socks5h:// 地址。CPA 将用它完成 OAuth，并自动保存到账号。登录用的浏览器需要单独配置为同一出口 IP。",
 +    "socks_required": "请先粘贴 SOCKS 代理，再开始登录。",
@@ -368,10 +407,12 @@ diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
 diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
 --- a/src/i18n/locales/zh-TW.json
 +++ b/src/i18n/locales/zh-TW.json
-@@ -818,6 +818,13 @@
+@@ -818,6 +818,15 @@
      "upgrade_required_desc": "目前伺服器版本不支援 OAuth 模型別名功能，請升級到最新版本的 CPA（CLI Proxy API）後重試。"
    },
    "auth_login": {
++    "socks_optional_label": "帳號 SOCKS 代理（外掛選填）",
++    "socks_optional_hint": "留空以使用外掛或全域網路設定。填寫後，CPA 會使用此 SOCKS 完成登入，並自動儲存至帳號。",
 +    "socks_label": "帳號 SOCKS 代理（必填）",
 +    "socks_hint": "貼上含連接埠的 socks5:// 或 socks5h:// 位址。CPA 會用它完成 OAuth，並自動儲存至帳號。登入用的瀏覽器需另外設定為相同出口 IP。",
 +    "socks_required": "請先貼上 SOCKS 代理，再開始登入。",
@@ -385,10 +426,12 @@ diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
 diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
 --- a/src/i18n/locales/ru.json
 +++ b/src/i18n/locales/ru.json
-@@ -823,6 +823,13 @@
+@@ -823,6 +823,15 @@
      "upgrade_required_desc": "Текущая версия сервера не поддерживает API псевдонимов моделей OAuth. Обновите CLI Proxy API (CPA) до последней версии."
    },
    "auth_login": {
++    "socks_optional_label": "SOCKS-прокси аккаунта (необязательно для плагинов)",
++    "socks_optional_hint": "Оставьте поле пустым, чтобы использовать сетевые настройки плагина или общие настройки. Если указан SOCKS-прокси, CPA использует его для входа и сохранит в аккаунте.",
 +    "socks_label": "SOCKS-прокси аккаунта (обязательно)",
 +    "socks_hint": "Вставьте адрес socks5:// или socks5h:// с портом. CPA использует его для OAuth и сохранит в аккаунте. Настройте браузер отдельно для того же внешнего IP.",
 +    "socks_required": "Перед входом укажите SOCKS-прокси.",
@@ -402,10 +445,12 @@ diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
 diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
 --- a/src/i18n/locales/vi.json
 +++ b/src/i18n/locales/vi.json
-@@ -776,6 +776,13 @@
+@@ -776,6 +776,15 @@
      "remove_mapping": "Xóa ánh xạ bí danh {{number}}"
    },
    "auth_login": {
++    "socks_optional_label": "Proxy SOCKS của tài khoản (không bắt buộc với plugin)",
++    "socks_optional_hint": "Để trống để dùng cấu hình mạng của plugin hoặc cấu hình chung. Nếu nhập proxy SOCKS, CPA sẽ dùng để đăng nhập và lưu vào tài khoản.",
 +    "socks_label": "Proxy SOCKS của tài khoản (bắt buộc)",
 +    "socks_hint": "Dán địa chỉ socks5:// hoặc socks5h:// kèm cổng. CPA dùng proxy cho OAuth và lưu vào tài khoản. Cần cấu hình riêng trình duyệt để dùng cùng IP đầu ra.",
 +    "socks_required": "Dán proxy SOCKS trước khi đăng nhập.",
@@ -419,10 +464,12 @@ diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
 diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
 --- a/src/i18n/locales/ko.json
 +++ b/src/i18n/locales/ko.json
-@@ -820,6 +820,13 @@
+@@ -820,6 +820,15 @@
      "upgrade_required_desc": "현재 서버는 OAuth 모델 별칭 API를 지원하지 않습니다. 최신 버전의 CLI Proxy API(CPA)로 업그레이드하세요."
    },
    "auth_login": {
++    "socks_optional_label": "계정 SOCKS 프록시 (플러그인은 선택 사항)",
++    "socks_optional_hint": "비워 두면 플러그인 또는 전역 네트워크 설정을 사용합니다. 입력하면 CPA가 로그인에 이 SOCKS 프록시를 사용하고 계정에 저장합니다.",
 +    "socks_label": "계정 SOCKS 프록시 (필수)",
 +    "socks_hint": "포트가 포함된 socks5:// 또는 socks5h:// 주소를 붙여 넣으세요. CPA는 OAuth에 사용하고 계정에 저장합니다. 브라우저도 같은 외부 IP를 사용하도록 별도로 설정해야 합니다.",
 +    "socks_required": "로그인 전에 SOCKS 프록시를 입력하세요.",
@@ -436,10 +483,12 @@ diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
 diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
 --- a/src/i18n/locales/tr.json
 +++ b/src/i18n/locales/tr.json
-@@ -820,6 +820,13 @@
+@@ -820,6 +820,15 @@
      "upgrade_required_desc": "Geçerli Sunucu OAuth Model Takma Adları API Değerini Desteklemiyor. En Son CLIProxyAPI (CPA) Sürümüne Yükselt."
    },
    "auth_login": {
++    "socks_optional_label": "Hesap SOCKS vekil sunucusu (eklentiler için isteğe bağlı)",
++    "socks_optional_hint": "Eklentinin veya genel ağ ayarlarını kullanmak için boş bırakın. Girilirse CPA oturum açmak için bu SOCKS vekil sunucusunu kullanır ve hesaba kaydeder.",
 +    "socks_label": "Hesap SOCKS vekil sunucusu (zorunlu)",
 +    "socks_hint": "Port içeren bir socks5:// veya socks5h:// adresi yapıştırın. CPA bunu OAuth için kullanır ve hesaba kaydeder. Tarayıcıyı aynı çıkış IP adresini kullanacak şekilde ayrıca yapılandırın.",
 +    "socks_required": "Oturum açmadan önce bir SOCKS vekil sunucusu girin.",
