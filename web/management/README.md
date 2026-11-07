@@ -6,7 +6,9 @@ commit `953fb2444350c6c36052dda46cac0abce6b23ea6` of
 The source archive SHA-256 is checked before any build steps run.
 
 `native-settings.patch` adds the picker to Advanced → Default headers and updates
-all seven locales. `overlay/` contains the new React component, API adapter,
+all seven locales. It also corrects an upstream HTML-escaping assertion and tests
+it in English and Chinese, keeping Linux test order from breaking the build.
+`overlay/` contains the new React component, API adapter,
 configuration mapping, styles, and regression tests. It uses the existing v8
 management client, connection guards, controls, and configuration save flow. It
 does not inject scripts into a downloaded release or edit generated HTML.
