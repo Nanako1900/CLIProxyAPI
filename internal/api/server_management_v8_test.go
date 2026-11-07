@@ -132,7 +132,7 @@ func TestManagementV8IndependentContract(t *testing.T) {
 	}{
 		{http.MethodGet, "/v8/management/oauth/auth-url", `{"error":"provider is required"}`, http.StatusBadRequest},
 		{http.MethodGet, "/v8/management/oauth/auth-url?provider=%20", `{"error":"provider is required"}`, http.StatusBadRequest},
-		{http.MethodGet, "/v8/management/oauth/auth-url?provider=unknown", `{"error":"provider_not_found"}`, http.StatusNotFound},
+		{http.MethodGet, "/v8/management/oauth/auth-url?provider=unknown", `{"error":"proxy_url is required: use socks5:// or socks5h://host:port"}`, http.StatusBadRequest},
 		{http.MethodPost, "/v8/management/oauth/import", `{"error":"provider is required"}`, http.StatusBadRequest},
 		{http.MethodPost, "/v8/management/oauth/import?provider=codex", `{"error":"provider_not_found"}`, http.StatusNotFound},
 		{http.MethodPost, "/v8/management/oauth/import?provider=vertex", `{"error":"file required"}`, http.StatusBadRequest},
@@ -148,7 +148,11 @@ func TestManagementV8IndependentContract(t *testing.T) {
 		{"/v0/management/codex-auth-url", "codex"},
 		{"/v0/management/anthropic-auth-url", "anthropic"},
 	} {
-		body := request(http.MethodGet, tc.url, "", http.StatusOK)
+		method, payload := http.MethodGet, ""
+		if strings.HasPrefix(tc.url, "/v8/") {
+			method, payload = http.MethodPost, `{"proxy_url":"socks5://127.0.0.1:1080"}`
+		}
+		body := request(method, tc.url, payload, http.StatusOK)
 		var login struct{ URL, State string }
 		if errDecode := json.Unmarshal([]byte(body), &login); errDecode != nil {
 			t.Fatal(errDecode)
