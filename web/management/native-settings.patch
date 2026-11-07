@@ -1,0 +1,424 @@
+diff --git a/src/features/config/components/sections/SectionAdvanced.tsx b/src/features/config/components/sections/SectionAdvanced.tsx
+index 469940b..beccde1 100644
+--- a/src/features/config/components/sections/SectionAdvanced.tsx
++++ b/src/features/config/components/sections/SectionAdvanced.tsx
+@@ -14,6 +14,7 @@ import {
+   TextSetting,
+   ToggleSetting,
+ } from '../fields/FieldPrimitives';
++import { ClientUserAgentPicker } from '../blocks/ClientUserAgentPicker';
+ import { PluginStoreAuthEditor } from '../blocks/PluginStoreAuthEditor';
+ import { StringListEditor } from '../blocks/StringListEditor';
+ import { getValidationMessage } from '../blocks/shared';
+@@ -21,7 +22,7 @@ import { SectionOAuthBehavior } from './SectionOAuthBehavior';
+
+ const Icon = CONFIG_TAB_ICONS.advanced;
+
+-/** 05 高级与实验：插件源、供应商敏感词、签名缓存与请求头默认值。 */
++/** Advanced settings: plugins, sensitive words, signature cache, and default headers. */
+ export function SectionAdvanced({
+   values,
+   validationErrors,
+@@ -228,12 +229,13 @@ export function SectionAdvanced({
+         defaultOpen={false}
+       >
+         <FieldStack>
++          <ClientUserAgentPicker provider="claude" disabled={disabled} onChange={onChange} />
+           <SettingList title={t('config_management.visual.sections.headers.claude_title')}>
+             <TextSetting
+               fieldId="claudeHeaderUserAgent"
+               size="lg"
+               label={t('config_management.visual.sections.headers.user_agent')}
+-              placeholder="claude-cli/2.1.44 (external, sdk-cli)"
++              placeholder="auto"
+               value={values.claudeHeaderUserAgent}
+               onChange={(claudeHeaderUserAgent) => onChange({ claudeHeaderUserAgent })}
+               disabled={disabled}
+@@ -304,12 +306,13 @@ export function SectionAdvanced({
+             />
+           </SettingList>
+
++          <ClientUserAgentPicker provider="codex" disabled={disabled} onChange={onChange} />
+           <SettingList title={t('config_management.visual.sections.headers.codex_title')}>
+             <TextSetting
+               fieldId="codexHeaderUserAgent"
+               size="lg"
+               label={t('config_management.visual.sections.headers.user_agent')}
+-              placeholder="codex_cli_rs/0.114.0 (Mac OS 14.2.0; x86_64) vscode/1.111.0"
++              placeholder="auto"
+               value={values.codexHeaderUserAgent}
+               onChange={(codexHeaderUserAgent) => onChange({ codexHeaderUserAgent })}
+               disabled={disabled}
+diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
+index 80a1449..03d4fb0 100644
+--- a/src/i18n/locales/en.json
++++ b/src/i18n/locales/en.json
+@@ -1407,8 +1407,8 @@
+         },
+         "headers": {
+           "title": "Header Defaults",
+-          "description": "Default headers for Claude and Codex OAuth requests when the client omits them",
+-          "claude_title": "Claude OAuth Header Defaults",
++          "description": "Choose a captured client identity below, or set a manual UA / auto. Credential-specific User-Agent headers take priority.",
++          "claude_title": "Claude shared request headers",
+           "codex_title": "Codex OAuth Header Defaults",
+           "user_agent": "User-Agent",
+           "package_version": "Package Version",
+@@ -2428,5 +2428,35 @@
+     "error": "Binding failed. Please start over.",
+     "unsupported": "This backend does not support SIWC binding.",
+     "expired": "The binding session expired. Please start over."
++  },
++  "client_user_agents": {
++    "title": "{{provider}} client UA list",
++    "refresh": "Refresh list",
++    "import": "Import request headers",
++    "description": "Collects identities declared by authenticated clients connected to CPA. Headers are not proof of an official client. Select a sample to fill the settings below.",
++    "claude_scope": "Applies to Claude OAuth and API keys. A credential’s custom User-Agent takes priority.",
++    "codex_scope": "Applies to Codex OAuth. Codex API keys use their own custom User-Agent header.",
++    "select": "Select {{provider}} User-Agent",
++    "loading": "Loading…",
++    "placeholder": "Choose a client identity",
++    "empty": "No samples yet. Send a request from your client to CPA, then refresh; or import request headers.",
++    "last_seen": "Last seen:",
++    "count": "Requests: {{count}}",
++    "observed": "Request observed",
++    "imported": "Manually imported",
++    "auto": "Auto — follow the official stable client version",
++    "native": "Default — use CPA’s native UA behavior",
++    "auto_hint": "Auto updates the UA version from npm. It does not collect or update the other client headers.",
++    "apply_ua": "Use this UA",
++    "apply_profile": "Use UA and captured fields",
++    "remove": "Delete sample",
++    "applied": "Settings filled. Click Save changes on this page to apply. Fields missing from the sample stay unchanged.",
++    "import_preview": "Import and preview",
++    "import_hint": "Paste a header block or a raw HTTP request (up to 32 KiB). Only supported UA-related headers are sent and stored; credentials, cookies and the body are discarded. Importing does not change your active settings.",
++    "headers": "Request headers",
++    "invalid_import": "Paste headers containing a Claude Code or Codex User-Agent, up to 32 KiB.",
++    "load_error": "Could not load client UAs.",
++    "import_error": "Could not import request headers.",
++    "delete_error": "Could not delete the sample."
+   }
+ }
+diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
+index c807d74..65905ef 100644
+--- a/src/i18n/locales/ko.json
++++ b/src/i18n/locales/ko.json
+@@ -1407,8 +1407,8 @@
+         },
+         "headers": {
+           "title": "헤더 기본값",
+-          "description": "클라이언트에서 생략된 경우 Claude 및 Codex OAuth 요청에 사용할 기본 헤더입니다.",
+-          "claude_title": "Claude OAuth 헤더 기본값",
++          "description": "아래 샘플을 선택하거나 UA / auto를 직접 입력하세요. 자격 증명별 User-Agent가 우선합니다.",
++          "claude_title": "Claude 공통 요청 헤더",
+           "codex_title": "Codex OAuth 헤더 기본값",
+           "user_agent": "User-Agent",
+           "package_version": "Package Version",
+@@ -2428,5 +2428,35 @@
+     "error": "바인딩에 실패했습니다. 다시 시작하세요.",
+     "unsupported": "이 서버는 SIWC 바인딩을 지원하지 않습니다.",
+     "expired": "바인딩 세션이 만료되었습니다. 다시 시작하세요."
++  },
++  "client_user_agents": {
++    "title": "{{provider}} 클라이언트 UA 목록",
++    "refresh": "목록 새로 고침",
++    "import": "요청 헤더 가져오기",
++    "description": "CPA에 연결된 인증된 클라이언트의 헤더를 수집합니다. 헤더가 공식 클라이언트임을 증명하지는 않습니다. 샘플을 선택하여 아래 설정을 채우세요.",
++    "claude_scope": "Claude OAuth와 API 키에 적용됩니다. 자격 증명별 User-Agent가 우선합니다.",
++    "codex_scope": "Codex OAuth에 적용됩니다. Codex API 키는 해당 자격 증명의 사용자 지정 User-Agent 헤더를 사용합니다.",
++    "select": "{{provider}} User-Agent 선택",
++    "loading": "불러오는 중…",
++    "placeholder": "클라이언트 UA 선택",
++    "empty": "아직 샘플이 없습니다. 클라이언트에서 CPA로 요청한 뒤 새로 고치거나 요청 헤더를 가져오세요.",
++    "last_seen": "최근 기록:",
++    "count": "요청: {{count}}회",
++    "observed": "요청에서 수집",
++    "imported": "직접 가져옴",
++    "auto": "자동 — 공식 안정 버전 사용",
++    "native": "기본 — CPA의 기존 UA 규칙 사용",
++    "auto_hint": "npm에서 UA 버전만 자동 업데이트합니다. 다른 클라이언트 헤더는 수집하거나 업데이트하지 않습니다.",
++    "apply_ua": "이 UA 사용",
++    "apply_profile": "UA와 수집된 필드 사용",
++    "remove": "샘플 삭제",
++    "applied": "설정을 채웠습니다. 이 페이지에서 변경 사항 저장을 누르세요. 샘플에 없는 필드는 유지됩니다.",
++    "import_preview": "가져오기 및 미리 보기",
++    "import_hint": "헤더 또는 전체 HTTP 요청을 붙여넣으세요(최대 32 KiB). 지원되는 UA 관련 필드만 전송 및 저장하며 키, 쿠키, 본문은 제거합니다. 가져오기만으로 현재 설정이 변경되지는 않습니다.",
++    "headers": "요청 헤더",
++    "invalid_import": "Claude Code 또는 Codex User-Agent가 포함된 헤더를 붙여넣으세요. 최대 32 KiB입니다.",
++    "load_error": "UA 목록을 불러올 수 없습니다.",
++    "import_error": "헤더를 가져올 수 없습니다.",
++    "delete_error": "샘플을 삭제할 수 없습니다."
+   }
+ }
+diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
+index a985378..d97d569 100644
+--- a/src/i18n/locales/ru.json
++++ b/src/i18n/locales/ru.json
+@@ -1410,8 +1410,8 @@
+         },
+         "headers": {
+           "title": "Заголовки по умолчанию",
+-          "description": "Заголовки по умолчанию для OAuth-запросов Claude и Codex, когда клиент их не отправил",
+-          "claude_title": "Заголовки Claude OAuth по умолчанию",
++          "description": "Выберите образец ниже или укажите UA / auto вручную. User-Agent отдельной учётной записи имеет приоритет.",
++          "claude_title": "Общие заголовки Claude",
+           "codex_title": "Заголовки Codex OAuth по умолчанию",
+           "user_agent": "User-Agent",
+           "package_version": "Package Version",
+@@ -2422,5 +2422,35 @@
+     "error": "Привязка не удалась. Начните заново.",
+     "unsupported": "Этот сервер не поддерживает привязку SIWC.",
+     "expired": "Сеанс привязки истёк. Начните заново."
++  },
++  "client_user_agents": {
++    "title": "UA клиентов {{provider}}",
++    "refresh": "Обновить список",
++    "import": "Импорт заголовков",
++    "description": "Собирает идентификаторы из запросов авторизованных клиентов CPA. Заголовки не подтверждают подлинность клиента. Выберите образец для заполнения настроек.",
++    "claude_scope": "Для Claude OAuth и API-ключей. User-Agent отдельной учётной записи имеет приоритет.",
++    "codex_scope": "Для Codex OAuth. Для API-ключей Codex задайте User-Agent в заголовках учётной записи.",
++    "select": "Выбрать User-Agent {{provider}}",
++    "loading": "Загрузка…",
++    "placeholder": "Выберите UA клиента",
++    "empty": "Образцов пока нет. Отправьте запрос через CPA и обновите список или импортируйте заголовки.",
++    "last_seen": "Последняя запись:",
++    "count": "Запросов: {{count}}",
++    "observed": "Из запроса",
++    "imported": "Ручной импорт",
++    "auto": "Авто — стабильная официальная версия клиента",
++    "native": "По умолчанию — штатные правила UA в CPA",
++    "auto_hint": "Автоматически обновляется только версия UA из npm, а не остальные заголовки клиента.",
++    "apply_ua": "Использовать UA",
++    "apply_profile": "Использовать UA и собранные поля",
++    "remove": "Удалить образец",
++    "applied": "Поля заполнены. Нажмите «Сохранить изменения» на странице. Отсутствующие в образце поля не изменены.",
++    "import_preview": "Импорт и просмотр",
++    "import_hint": "Вставьте заголовки или полный HTTP-запрос (до 32 КиБ). Передаются и сохраняются только поддерживаемые поля UA; ключи, cookie и тело отбрасываются. Импорт не меняет активные настройки.",
++    "headers": "Заголовки запроса",
++    "invalid_import": "Вставьте заголовки с User-Agent Claude Code или Codex, до 32 КиБ.",
++    "load_error": "Не удалось загрузить UA.",
++    "import_error": "Не удалось импортировать заголовки.",
++    "delete_error": "Не удалось удалить образец."
+   }
+ }
+diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
+index b788132..05c42de 100644
+--- a/src/i18n/locales/tr.json
++++ b/src/i18n/locales/tr.json
+@@ -1407,8 +1407,8 @@
+         },
+         "headers": {
+           "title": "Üst Bilgi Varsayılanları",
+-          "description": "İstemci Atladığında Claude ve Codex OAuth İstekleri için Varsayılan Üst Bilgiler",
+-          "claude_title": "Claude OAuth Üst Bilgi Varsayılanları",
++          "description": "Aşağıdan örnek seçin veya UA / auto girin. Kimlik bilgisine özel User-Agent önceliklidir.",
++          "claude_title": "Claude ortak istek başlıkları",
+           "codex_title": "Codex OAuth Üst Bilgi Varsayılanları",
+           "user_agent": "User-Agent",
+           "package_version": "Paket Sürümü",
+@@ -2428,5 +2428,35 @@
+     "error": "Bağlama Başarısız Oldu. Lütfen Yeniden Başla.",
+     "unsupported": "Bu Arka Uç SIWC Bağlamayı Desteklemiyor.",
+     "expired": "Bağlama Oturumunun Süresi Doldu. Lütfen Yeniden Başla."
++  },
++  "client_user_agents": {
++    "title": "{{provider}} istemci UA listesi",
++    "refresh": "Listeyi yenile",
++    "import": "İstek başlıklarını içe aktar",
++    "description": "CPA’ya bağlanan, kimliği doğrulanmış istemcilerin bildirdiği kimlikleri toplar. Başlıklar resmi istemciyi doğrulamaz. Ayarları doldurmak için bir örnek seçin.",
++    "claude_scope": "Claude OAuth ve API anahtarlarına uygulanır. Kimlik bilgisine özel User-Agent önceliklidir.",
++    "codex_scope": "Codex OAuth için geçerlidir. Codex API anahtarlarında ilgili kimlik bilgisinin özel User-Agent başlığını ayarlayın.",
++    "select": "{{provider}} User-Agent seç",
++    "loading": "Yükleniyor…",
++    "placeholder": "Bir istemci UA seçin",
++    "empty": "Henüz örnek yok. CPA üzerinden bir istek gönderip yenileyin veya istek başlıklarını içe aktarın.",
++    "last_seen": "Son kayıt:",
++    "count": "İstek: {{count}}",
++    "observed": "İstekten toplandı",
++    "imported": "Elle içe aktarıldı",
++    "auto": "Otomatik — resmi kararlı istemci sürümünü izle",
++    "native": "Varsayılan — CPA’nın mevcut UA kurallarını kullan",
++    "auto_hint": "Otomatik mod npm üzerinden UA sürümünü günceller. Diğer istemci başlıklarını toplamaz veya güncellemez.",
++    "apply_ua": "Bu UA’yı kullan",
++    "apply_profile": "UA ve toplanan alanları kullan",
++    "remove": "Örneği sil",
++    "applied": "Ayarlar dolduruldu. Uygulamak için sayfadaki Değişiklikleri kaydet düğmesine basın. Örnekte olmayan alanlar korunur.",
++    "import_preview": "İçe aktar ve ön izle",
++    "import_hint": "Başlıkları veya tam HTTP isteğini yapıştırın (en fazla 32 KiB). Yalnızca desteklenen UA alanları gönderilir ve saklanır; anahtarlar, çerezler ve gövde atılır. İçe aktarma etkin ayarları değiştirmez.",
++    "headers": "İstek başlıkları",
++    "invalid_import": "Claude Code veya Codex User-Agent içeren başlıkları yapıştırın; en fazla 32 KiB.",
++    "load_error": "İstemci UA listesi yüklenemedi.",
++    "import_error": "Başlıklar içe aktarılamadı.",
++    "delete_error": "Örnek silinemedi."
+   }
+ }
+diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
+index c11cfbe..222514c 100644
+--- a/src/i18n/locales/vi.json
++++ b/src/i18n/locales/vi.json
+@@ -1199,8 +1199,8 @@
+         },
+         "headers": {
+           "title": "Header mặc định",
+-          "description": "Header mặc định cho yêu cầu OAuth Claude và Codex khi client không gửi",
+-          "claude_title": "Header mặc định Claude",
++          "description": "Chọn mẫu bên dưới hoặc nhập UA / auto. User-Agent riêng của thông tin xác thực được ưu tiên.",
++          "claude_title": "Header dùng chung cho Claude",
+           "codex_title": "Header mặc định Codex",
+           "user_agent": "User-Agent",
+           "package_version": "Phiên bản gói",
+@@ -2434,5 +2434,35 @@
+     "error": "Liên kết thất bại. Hãy bắt đầu lại.",
+     "unsupported": "Máy chủ này không hỗ trợ liên kết SIWC.",
+     "expired": "Phiên liên kết đã hết hạn. Hãy bắt đầu lại."
++  },
++  "client_user_agents": {
++    "title": "Danh sách UA {{provider}}",
++    "refresh": "Làm mới",
++    "import": "Nhập header yêu cầu",
++    "description": "Thu thập danh tính do máy khách đã xác thực gửi đến CPA. Header không xác minh máy khách chính thức. Chọn mẫu để điền cài đặt bên dưới.",
++    "claude_scope": "Áp dụng cho Claude OAuth và khóa API. User-Agent riêng của thông tin xác thực được ưu tiên.",
++    "codex_scope": "Áp dụng cho Codex OAuth. Với khóa API Codex, đặt User-Agent trong header tùy chỉnh của khóa.",
++    "select": "Chọn User-Agent {{provider}}",
++    "loading": "Đang tải…",
++    "placeholder": "Chọn UA máy khách",
++    "empty": "Chưa có mẫu. Gửi yêu cầu qua CPA rồi làm mới, hoặc nhập header yêu cầu.",
++    "last_seen": "Ghi nhận gần nhất:",
++    "count": "Yêu cầu: {{count}}",
++    "observed": "Từ yêu cầu",
++    "imported": "Nhập thủ công",
++    "auto": "Tự động — theo phiên bản ổn định chính thức",
++    "native": "Mặc định — dùng quy tắc UA của CPA",
++    "auto_hint": "Tự động cập nhật phiên bản UA từ npm, không thu thập hay cập nhật các header khác.",
++    "apply_ua": "Dùng UA này",
++    "apply_profile": "Dùng UA và các trường đã thu thập",
++    "remove": "Xóa mẫu",
++    "applied": "Đã điền cài đặt. Nhấn Lưu thay đổi trên trang để áp dụng. Các trường không có trong mẫu được giữ nguyên.",
++    "import_preview": "Nhập và xem trước",
++    "import_hint": "Dán header hoặc yêu cầu HTTP đầy đủ (tối đa 32 KiB). Chỉ gửi và lưu các trường UA được hỗ trợ; khóa, cookie và nội dung bị loại bỏ. Nhập không thay đổi cài đặt đang dùng.",
++    "headers": "Header yêu cầu",
++    "invalid_import": "Dán header chứa User-Agent Claude Code hoặc Codex, tối đa 32 KiB.",
++    "load_error": "Không thể tải UA máy khách.",
++    "import_error": "Không thể nhập header.",
++    "delete_error": "Không thể xóa mẫu."
+   }
+ }
+diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
+index 7c639e0..3f19e4d 100644
+--- a/src/i18n/locales/zh-CN.json
++++ b/src/i18n/locales/zh-CN.json
+@@ -554,7 +554,6 @@
+     "reset_confirm_button": "确认重置",
+     "reset_not_confirmed": "未确认额度重置成功，请刷新额度后再决定是否重试。",
+     "reset_cooldown_failed": "额度已重置，但代理冷却清除失败。请在原连接的认证文件页面使用“清除冷却”，不要再次消耗重置卡。",
+-
+     "reset_success": "已重置 \"{{name}}\" 的 Codex 额度",
+     "reset_failed": "重置 \"{{name}}\" 的 Codex 额度失败：{{message}}",
+     "plan_plus": "Plus",
+@@ -1406,8 +1405,8 @@
+         },
+         "headers": {
+           "title": "Header 默认值",
+-          "description": "Claude 与 Codex OAuth 请求在客户端缺少 Header 时使用的默认值",
+-          "claude_title": "Claude OAuth 默认请求头",
++          "description": "可从下方选择客户端记录，或手动填写 UA / auto。凭据单独设置的 User-Agent 优先。",
++          "claude_title": "Claude 共享请求头",
+           "codex_title": "Codex OAuth 默认请求头",
+           "user_agent": "User-Agent",
+           "package_version": "Package Version",
+@@ -2427,5 +2426,35 @@
+     "error": "绑定失败，请重新开始。",
+     "unsupported": "当前后端不支持 SIWC 绑定。",
+     "expired": "绑定会话已过期，请重新开始。"
++  },
++  "client_user_agents": {
++    "title": "{{provider}} 客户端 UA 列表",
++    "refresh": "刷新列表",
++    "import": "导入请求头",
++    "description": "从连接到 CPA 且通过认证的客户端请求中采集。UA 由客户端声明，并非官方身份验证。选择后可填入下方设置。",
++    "claude_scope": "适用于 Claude OAuth 和 API Key。凭据单独设置的 User-Agent 优先。",
++    "codex_scope": "适用于 Codex OAuth。Codex API Key 请在对应凭据的自定义请求头中设置 User-Agent。",
++    "select": "选择 {{provider}} User-Agent",
++    "loading": "正在加载…",
++    "placeholder": "选择一个客户端 UA",
++    "empty": "还没有记录。让客户端通过 CPA 发起一次请求后刷新，或直接导入请求头。",
++    "last_seen": "最近记录：",
++    "count": "采集请求：{{count}} 次",
++    "observed": "请求采集",
++    "imported": "手动导入",
++    "auto": "自动更新 — 跟随官方稳定版客户端版本",
++    "native": "默认 — 使用 CPA 原有的 UA 规则",
++    "auto_hint": "自动模式从 npm 更新 UA 中的版本号，不会采集或更新其他客户端请求头。",
++    "apply_ua": "使用这个 UA",
++    "apply_profile": "使用 UA 和已采集字段",
++    "remove": "删除记录",
++    "applied": "已填入设置，请点击本页「保存更改」后生效。样本中没有的字段保持原值。",
++    "import_preview": "导入并预览",
++    "import_hint": "粘贴请求头或完整 HTTP 请求（最多 32 KiB）。只发送和保存支持的 UA 相关字段，密钥、Cookie 和正文会被丢弃。导入不会直接改变当前设置。",
++    "headers": "请求头内容",
++    "invalid_import": "请粘贴含 Claude Code 或 Codex User-Agent 的请求头，最多 32 KiB。",
++    "load_error": "无法加载客户端 UA。",
++    "import_error": "请求头导入失败。",
++    "delete_error": "删除记录失败。"
+   }
+ }
+diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
+index ce783c8..34b07ef 100644
+--- a/src/i18n/locales/zh-TW.json
++++ b/src/i18n/locales/zh-TW.json
+@@ -554,7 +554,6 @@
+     "reset_confirm_button": "確認重置",
+     "reset_not_confirmed": "尚未確認額度重置成功，請重新整理額度後再決定是否重試。",
+     "reset_cooldown_failed": "額度已重置，但代理冷卻清除失敗。請在原連線的認證檔案頁面使用「清除冷卻」，不要再次消耗重置卡。",
+-
+     "reset_success": "已重置「{{name}}」的 Codex 配額",
+     "reset_failed": "重置「{{name}}」的 Codex 配額失敗：{{message}}",
+     "plan_plus": "Plus",
+@@ -1434,8 +1433,8 @@
+         },
+         "headers": {
+           "title": "Header 預設值",
+-          "description": "Claude 與 Codex OAuth 請求在客戶端缺少 Header 時使用的預設值",
+-          "claude_title": "Claude OAuth 預設請求標頭",
++          "description": "可從下方選擇用戶端紀錄，或手動填寫 UA / auto。憑證個別設定的 User-Agent 優先。",
++          "claude_title": "Claude 共用請求標頭",
+           "codex_title": "Codex OAuth 預設請求標頭",
+           "user_agent": "User-Agent",
+           "package_version": "Package Version",
+@@ -2455,5 +2454,35 @@
+     "error": "綁定失敗，請重新開始。",
+     "unsupported": "目前後端不支援 SIWC 綁定。",
+     "expired": "綁定工作階段已過期，請重新開始。"
++  },
++  "client_user_agents": {
++    "title": "{{provider}} 用戶端 UA 清單",
++    "refresh": "重新整理",
++    "import": "匯入請求標頭",
++    "description": "從連線到 CPA 且通過驗證的用戶端請求中收集。UA 由用戶端宣告，並非官方身分驗證。選擇後可填入下方設定。",
++    "claude_scope": "適用於 Claude OAuth 與 API Key。憑證個別設定的 User-Agent 優先。",
++    "codex_scope": "適用於 Codex OAuth。Codex API Key 請在對應憑證的自訂標頭設定 User-Agent。",
++    "select": "選擇 {{provider}} User-Agent",
++    "loading": "載入中…",
++    "placeholder": "選擇一個用戶端 UA",
++    "empty": "尚無紀錄。讓用戶端透過 CPA 發出請求後重新整理，或匯入請求標頭。",
++    "last_seen": "最近紀錄：",
++    "count": "收集請求：{{count}} 次",
++    "observed": "請求收集",
++    "imported": "手動匯入",
++    "auto": "自動更新 — 跟隨官方穩定版用戶端版本",
++    "native": "預設 — 使用 CPA 原有 UA 規則",
++    "auto_hint": "自動模式從 npm 更新 UA 中的版本號，不會收集或更新其他用戶端標頭。",
++    "apply_ua": "使用此 UA",
++    "apply_profile": "使用 UA 與已收集欄位",
++    "remove": "刪除紀錄",
++    "applied": "已填入設定，請點擊本頁「儲存變更」後生效。樣本中沒有的欄位保持原值。",
++    "import_preview": "匯入並預覽",
++    "import_hint": "貼上請求標頭或完整 HTTP 請求（最多 32 KiB）。僅傳送與儲存支援的 UA 相關欄位，金鑰、Cookie 與本文會被丟棄。匯入不會直接更改目前設定。",
++    "headers": "請求標頭內容",
++    "invalid_import": "請貼上含 Claude Code 或 Codex User-Agent 的請求標頭，最多 32 KiB。",
++    "load_error": "無法載入用戶端 UA。",
++    "import_error": "請求標頭匯入失敗。",
++    "delete_error": "刪除紀錄失敗。"
+   }
+ }

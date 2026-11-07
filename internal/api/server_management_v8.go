@@ -29,6 +29,9 @@ func (s *Server) registerManagementV8Routes() {
 
 	v8.GET("/server/latest-version", s.mgmt.GetLatestVersion)
 	v8.POST("/requests/api-call", s.mgmt.APICall)
+	v8.GET("/client-user-agents", s.mgmt.ClientUserAgents)
+	v8.POST("/client-user-agents", s.mgmt.ClientUserAgents)
+	v8.DELETE("/client-user-agents/:id", s.mgmt.ClientUserAgents)
 	v8.POST("/routing/cooldown/reset", s.mgmt.ResetQuota)
 	v8.GET("/routing/model-definitions/:channel", s.mgmt.GetStaticModelDefinitions)
 	v8.POST("/routing/model-definitions/refresh", s.mgmt.RefreshModelDefinitions)

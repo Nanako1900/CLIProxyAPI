@@ -85,6 +85,28 @@ default does not apply to API-key groups. Values containing control characters,
 non-ASCII bytes, or more than 1024 bytes are rejected before saving. See
 [User-Agent settings](user-agent-settings.md) for refresh behavior and deployment.
 
+### Client User-Agent catalog
+
+The following endpoints require the existing management authentication and are
+unavailable in Home mode. They do not change active configuration:
+
+| Method and path | Behavior |
+| --- | --- |
+| `GET /client-user-agents?provider=claude` | Returns `{ "items": [...], "limit": 100 }`; use `codex` for Codex. |
+| `POST /client-user-agents?provider=claude` | Imports `{ "headers": "User-Agent: claude-cli/2.1.319\n..." }` and returns the sample. |
+| `DELETE /client-user-agents/:id?provider=claude` | Deletes a sample; returns 204. |
+
+Each sample has `id`, `provider`, `version`, whitelisted `headers`, `firstSeen`,
+`lastSeen`, `count`, `observed`, and `imported`. Dates use RFC 3339 UTC. `count`
+counts observed requests, not imports. Both source flags may be true. Lists are
+ordered by last-recorded time, newest first. Invalid/mismatched client identities
+return 422, invalid provider/body envelopes return 400, and persistence failures
+return 500. Imports accept at most 32 KiB of raw headers in a 64 KiB JSON envelope.
+
+Use the existing configuration save flow to apply a selected UA or supported
+header group. See [client UA settings](user-agent-settings.md#pick-an-identity-from-your-clients)
+for collection, whitelist, persistence, and scope details.
+
 ### Codex multi-agent configuration migration
 
 `client.codex.optimize-multi-agent-v2` is the sole runtime setting. Loading older
