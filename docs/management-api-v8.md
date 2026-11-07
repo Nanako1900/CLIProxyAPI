@@ -149,7 +149,7 @@ retain the corresponding business operation's fields.
 | `/credentials/refresh` | POST | Refresh credentials. |
 | `/credentials/verify` | POST | Run an operator-triggered, account-pinned inference verification using an isolated session and minimal 1-token prompt. |
 | `/oauth/import?provider=vertex` | POST | Import a Vertex service account using a multipart `file` upload. |
-| `/oauth/auth-url` | POST; GET for targeted recovery | Start built-in or plugin OAuth with a required account SOCKS proxy for new sessions; supports `name`/`auth_index` recovery and optional `verify`. |
+| `/oauth/auth-url` | POST; GET for plugins or targeted recovery | Start built-in or plugin OAuth with a required account SOCKS proxy for new built-in sessions; supports `name`/`auth_index` recovery and optional `verify`. |
 | `/oauth/siwc/bind` | POST | Start SIWC binding to an existing file-backed Codex OAuth credential. |
 | `/oauth/siwc/status` | GET | Read local SIWC credential status (`off`, `valid`, or `invalid`). |
 | `/oauth/status?state=<state>` | GET | Get login status. |
@@ -175,8 +175,12 @@ Content-Type: application/json
 {"provider":"codex","is_webui":true,"proxy_url":"socks5h://user:password@proxy.example.com:1080"}
 ```
 
-New account sessions require a valid SOCKS5/SOCKS5H `proxy_url` in the POST body;
+New built-in account sessions require a valid SOCKS5/SOCKS5H `proxy_url` in the POST body;
 query-string proxies, missing proxies, HTTP proxies, and direct mode are rejected.
+Plugin login/import requests may omit `proxy_url` or pass an empty value. They
+retain their existing plugin/global network settings. If a proxy is supplied,
+it is validated as before and applies to that session. Plugin GET logins remain
+supported. Unknown provider IDs still return `404 provider_not_found`.
 The session proxy is used for provider requests and saved with the credential before
 activation. This does not configure the user's browser proxy. See
 [OAuth account proxies](oauth-account-proxies.md) for routing and User-Agent scope.
@@ -302,7 +306,7 @@ operations in this release.
 
 The `/v0/management` endpoints keep their original paths and payloads, including
 provider-specific OAuth login URLs, callbacks, status queries, and cancellation.
-New v8 account sessions require a SOCKS proxy in the POST body. The deprecated
+New built-in v8 account sessions require a SOCKS proxy in the POST body. The deprecated
 v0 login routes retain their original behavior.
 
 Legacy flat configuration endpoints such as `/debug`, `/request-retry`, and

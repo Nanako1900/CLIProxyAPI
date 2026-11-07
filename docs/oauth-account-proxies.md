@@ -6,12 +6,18 @@ For example, `socks5h://username:password@proxy.example.com:1080`. Percent-encod
 reserved characters in the username or password. CPA must be able to reach the
 proxy; in Docker, `127.0.0.1` refers to the container itself.
 
-The field is required for every new built-in or plugin OAuth login. Empty values,
+The field is required for new built-in OAuth logins only. Empty values,
 HTTP proxies, direct mode, invalid ports, and URLs with paths or query parameters
 are rejected before starting a session. Validation checks the URL format; the
 actual connection happens when the provider flow makes an outbound request.
 The panel sends the address in a POST body, masks it in the input, and does not
 save it in browser storage. Starting another account returns to an empty field.
+
+Third-party plugins such as Kiro can start login or import credentials without
+`proxy_url`, including through their own plugin pages. The common OAuth dialog
+also makes SOCKS optional for plugins. Leaving it empty preserves the plugin and
+global network settings; an explicitly supplied proxy is still validated and
+saved as a session/account override. Plugin GET login routes remain supported.
 
 For authorization-code flows such as Codex and Claude, CPA constructs the login
 link locally. It does not fetch the link from the provider using any IP address.
@@ -31,7 +37,7 @@ Targeted reauthentication inherits the existing account proxy unless an explicit
 session proxy is supplied. SIWC binding also uses the selected Codex account's
 saved proxy. Existing credentials with HTTP proxies, explicit direct mode, or no
 proxy keep their previous routing policy; the new SOCKS requirement applies to
-new account sessions in the v8 management API. CLI logins and the deprecated v0
+new built-in account sessions in the v8 management API. CLI logins and the deprecated v0
 API are unchanged.
 
 ## Browser login and User-Agent

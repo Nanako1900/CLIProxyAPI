@@ -13,6 +13,8 @@ import (
 	"github.com/MoeForge/moego/ojson"
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
 // socksHTTPListener terminates SOCKS negotiation before the fixture HTTP server
@@ -117,7 +119,7 @@ func TestStartOAuthV8RequiresSOCKSBeforeProviderInitialization(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.POST("/start", h.StartOAuthV8)
-	for _, provider := range []string{"codex", "claude", "antigravity", "kimi", "kimi-ai", "xai", "devin", "meta", "custom-plugin"} {
+	for _, provider := range []string{"codex", " CoDeX ", "claude", "antigravity", "kimi", "kimi-ai", "xai", "devin", "meta"} {
 		for _, value := range []string{"", "http://user:secret@localhost:8080", "https://localhost:8080", "direct", "socks5://localhost", "socks5://localhost:0"} {
 			body := ojson.NewDocString(`{}`)
 			if errSet := body.Set("provider", provider); errSet != nil {
@@ -137,6 +139,72 @@ func TestStartOAuthV8RequiresSOCKSBeforeProviderInitialization(t *testing.T) {
 		if errValidate := validateNewOAuthSOCKSProxy(value); errValidate != nil {
 			t.Fatalf("valid SOCKS proxy rejected: %v", errValidate)
 		}
+	}
+}
+
+func TestStartOAuthV8PluginProxyIsOptional(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, globalProxy := range []string{"", "http://global.example.test:8080"} {
+		t.Run("global_"+globalProxy, func(t *testing.T) {
+			cfg := &config.Config{AuthDir: t.TempDir(), Port: 8317, SDKConfig: config.SDKConfig{ProxyURL: globalProxy}}
+			host := pluginhost.New()
+			host.ApplyConfig(context.Background(), cfg)
+			var captured pluginapi.AuthLoginStartRequest
+			calls := 0
+			host.RegisterPluginForTest("kiro-fixture", pluginapi.Plugin{
+				Capabilities: pluginapi.Capabilities{AuthProvider: &testAuthProvider{
+					identifier: "kiro",
+					startLogin: func(_ context.Context, req pluginapi.AuthLoginStartRequest) (pluginapi.AuthLoginStartResponse, error) {
+						captured = req
+						calls++
+						return pluginapi.AuthLoginStartResponse{Provider: "kiro", URL: "https://example.test/login", State: fmt.Sprintf("plugin-optional-proxy-%d", calls)}, nil
+					},
+				}},
+			})
+			h := NewHandlerWithoutConfigFilePath(cfg, nil)
+			h.SetPluginHost(host)
+			router := gin.New()
+			router.GET("/v8/management/oauth/auth-url", h.StartOAuthV8)
+			router.POST("/v8/management/oauth/auth-url", h.StartOAuthV8)
+			for _, tc := range []struct {
+				name, method, body, proxy string
+			}{
+				{"legacy_get", http.MethodGet, "", ""},
+				{"plugin_import", http.MethodPost, `{"provider":"kiro","external_idp":{"refresh_token":"fixture-only"}}`, ""},
+				{"empty_proxy", http.MethodPost, `{"provider":"kiro","proxy_url":""}`, ""},
+				{"optional_socks", http.MethodPost, `{"provider":"kiro","proxy_url":"socks5://proxy.example.test:1080"}`, "socks5://proxy.example.test:1080"},
+				{"optional_http", http.MethodPost, `{"provider":"kiro","proxy_url":"http://proxy.example.test:8080"}`, "http://proxy.example.test:8080"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					rec := httptest.NewRecorder()
+					router.ServeHTTP(rec, httptest.NewRequest(tc.method, "/v8/management/oauth/auth-url?provider=kiro", strings.NewReader(tc.body)))
+					if rec.Code != http.StatusOK {
+						t.Fatalf("plugin login status %d: %s", rec.Code, rec.Body.String())
+					}
+					state := ojson.Get(rec.Body.String(), "state").String()
+					t.Cleanup(func() { CancelOAuthSession(state) })
+					wantProxy := tc.proxy
+					if wantProxy == "" {
+						wantProxy = globalProxy
+					}
+					if captured.Host.ProxyURL != wantProxy || GetOAuthSessionProxyURL(state) != tc.proxy {
+						t.Fatal("plugin login did not preserve its default or explicit proxy")
+					}
+					if tc.name == "plugin_import" {
+						imported, ok := captured.Metadata["external_idp"].(map[string]any)
+						if !ok || imported["refresh_token"] != "fixture-only" {
+							t.Fatal("plugin import metadata was changed")
+						}
+					}
+				})
+			}
+			previousCalls := calls
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v8/management/oauth/auth-url", strings.NewReader(`{"provider":"kiro","proxy_url":"socks5://host:0"}`)))
+			if rec.Code != http.StatusBadRequest || calls != previousCalls {
+				t.Fatal("malformed explicit plugin proxy reached provider initialization")
+			}
+		})
 	}
 }
 

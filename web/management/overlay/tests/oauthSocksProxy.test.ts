@@ -5,8 +5,14 @@ import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
 import { apiClient } from '@/services/api/client';
 import { oauthApi } from '@/services/api/oauth';
-import { validateOAuthSocksProxy } from '@/features/oauth/socksProxy';
+import {
+  requiresOAuthSocksProxy,
+  validateOAuthSocksProxy,
+  validateOAuthLoginProxy,
+} from '@/features/oauth/socksProxy';
 import { OAuthFlowDialog } from '@/features/oauth/components/OAuthFlowDialog';
+import type { ProviderFlowState } from '@/features/oauth/hooks/useOAuthFlows';
+import type { i18n } from 'i18next';
 import en from '@/i18n/locales/en.json';
 import zhCN from '@/i18n/locales/zh-CN.json';
 import zhTW from '@/i18n/locales/zh-TW.json';
@@ -15,7 +21,31 @@ import ko from '@/i18n/locales/ko.json';
 import vi from '@/i18n/locales/vi.json';
 import tr from '@/i18n/locales/tr.json';
 
-describe('OAuth requires an account SOCKS proxy', () => {
+function renderDialog(i18n: i18n, providerId: string, state: ProviderFlowState = {}) {
+  return renderToStaticMarkup(
+    createElement(
+      I18nextProvider,
+      { i18n },
+      createElement(OAuthFlowDialog, {
+        open: true,
+        providerId,
+        heading: { title: providerId, caption: '', icon: '' },
+        state,
+        text: (suffix: string) => i18n.t(`auth_login.plugin_${suffix}`, { name: providerId }),
+        supportsCallback: true,
+        onStart: () => {},
+        onProxyChange: () => {},
+        onCancel: () => {},
+        onCallbackChange: () => {},
+        onCallbackSubmit: () => {},
+        onViewAuthFiles: () => {},
+        onClose: () => {},
+      })
+    )
+  );
+}
+
+describe('OAuth account proxy policy', () => {
   test('accepts authenticated SOCKS, remote DNS, IPv6 and surrounding whitespace', () => {
     for (const value of [
       'socks5://localhost:1080',
@@ -49,6 +79,53 @@ describe('OAuth requires an account SOCKS proxy', () => {
         expect(() => oauthApi.startAuth('codex', value)).toThrow();
       }
       expect(post).not.toHaveBeenCalled();
+    } finally {
+      post.mockRestore();
+    }
+  });
+
+  test('requires SOCKS only for normalized built-in OAuth providers', () => {
+    for (const provider of [
+      'codex',
+      ' CoDeX ',
+      'claude',
+      'anthropic',
+      'antigravity',
+      'kimi',
+      'kimi-ai',
+      'xai',
+      'devin',
+      'meta',
+      'Muse',
+    ]) {
+      expect(requiresOAuthSocksProxy(provider)).toBe(true);
+      expect(validateOAuthLoginProxy(provider, '')).toBe('required');
+    }
+    for (const provider of ['kiro', ' KIRO ', 'custom-plugin', 'codex-plugin']) {
+      expect(requiresOAuthSocksProxy(provider)).toBe(false);
+      expect(validateOAuthLoginProxy(provider, '')).toBeUndefined();
+      expect(validateOAuthLoginProxy(provider, '   ')).toBeUndefined();
+      expect(validateOAuthLoginProxy(provider, 'socks5://host:0')).toBe('invalid');
+    }
+  });
+
+  test('starts plugin login without including an empty proxy override', async () => {
+    const post = spyOn(apiClient, 'post').mockResolvedValue({
+      url: 'https://example.test',
+      state: 'plugin-state',
+    });
+    const signal = new AbortController().signal;
+    try {
+      await oauthApi.startAuth('kiro');
+      expect(post).toHaveBeenLastCalledWith('/oauth/auth-url', { provider: 'kiro' }, undefined);
+      await oauthApi.startAuth('custom-plugin', '   ', signal);
+      expect(post).toHaveBeenLastCalledWith(
+        '/oauth/auth-url',
+        { provider: 'custom-plugin' },
+        { signal }
+      );
+      expect(() => oauthApi.startAuth('kiro', 'socks5://host:0')).toThrow();
+      expect(post).toHaveBeenCalledTimes(2);
     } finally {
       post.mockRestore();
     }
@@ -99,30 +176,26 @@ describe('OAuth requires an account SOCKS proxy', () => {
     vi,
     tr,
   })) {
+    test(`plugin proxy is optional and proxy-free success makes no binding claim (${lng})`, async () => {
+      const i18n = createInstance();
+      await i18n.init({ lng, resources: { [lng]: { translation } } });
+      const markup = renderDialog(i18n, 'kiro');
+      expect(markup).not.toMatch(/<input[^>]*required/);
+      expect(markup).not.toMatch(/<button[^>]*type="submit"[^>]*disabled/);
+      expect(markup).not.toContain('auth_login.');
+      const success = renderDialog(i18n, 'kiro', { status: 'success', proxyBound: false });
+      const bound = renderDialog(i18n, 'kiro', { status: 'success', proxyBound: true });
+      const hint = renderToStaticMarkup(
+        createElement('p', null, i18n.t('auth_login.socks_saved_hint'))
+      ).slice(3, -4);
+      expect(success).not.toContain(hint);
+      expect(bound).toContain(hint);
+    });
+
     test(`shows proxy setup before any authorization link (${lng})`, async () => {
       const i18n = createInstance();
       await i18n.init({ lng, resources: { [lng]: { translation } } });
-      const markup = renderToStaticMarkup(
-        createElement(
-          I18nextProvider,
-          { i18n },
-          createElement(OAuthFlowDialog, {
-            open: true,
-            providerId: 'codex',
-            heading: { title: 'Codex', caption: '', icon: '' },
-            state: {},
-            text: (suffix: string) => i18n.t(`auth_login.codex_${suffix}`),
-            supportsCallback: true,
-            onStart: () => {},
-            onProxyChange: () => {},
-            onCancel: () => {},
-            onCallbackChange: () => {},
-            onCallbackSubmit: () => {},
-            onViewAuthFiles: () => {},
-            onClose: () => {},
-          })
-        )
-      );
+      const markup = renderDialog(i18n, 'codex');
       expect(markup).toContain('type="password"');
       expect(markup).toContain('autoComplete="off"');
       expect(markup).toMatch(/<input[^>]*required/);

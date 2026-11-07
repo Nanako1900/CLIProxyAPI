@@ -116,7 +116,16 @@ func validateOAuthSessionProxyURL(raw string) (string, error) {
 	return trimmed, nil
 }
 
-// New accounts must choose their own SOCKS route before any OAuth work starts.
+func builtinOAuthRequiresSOCKS(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "claude", "codex", "antigravity", "kimi", "kimi-ai", "xai", "devin", "meta":
+		return true
+	default:
+		return false
+	}
+}
+
+// New built-in accounts must choose their SOCKS route before OAuth work starts.
 // Existing credentials retain their saved route when they are reauthenticated.
 func validateNewOAuthSOCKSProxy(raw string) error {
 	proxyURL, errValidate := validateOAuthSessionProxyURL(raw)
@@ -439,7 +448,7 @@ func (h *Handler) StartOAuthV8(c *gin.Context) {
 			VerifyAfterLogin: verifyAfterLogin,
 			VerifyModel:      verifyModel,
 		})
-	} else if provider != "" {
+	} else if builtinOAuthRequiresSOCKS(provider) {
 		if errProxy := validateNewOAuthSOCKSProxy(oauthSessionProxyURLFromContext(c)); errProxy != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": errProxy.Error()})
 			return

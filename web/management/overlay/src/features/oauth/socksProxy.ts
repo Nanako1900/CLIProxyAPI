@@ -1,4 +1,30 @@
+import { normalizeManagementOAuthProviderKey } from '@/utils/providerKeys';
+
 export type OAuthProxyValidation = 'required' | 'invalid';
+
+const BUILTIN_OAUTH_PROVIDERS = new Set([
+  'codex',
+  'claude',
+  'anthropic',
+  'antigravity',
+  'kimi',
+  'kimi-ai',
+  'xai',
+  'devin',
+  'meta',
+]);
+
+export function requiresOAuthSocksProxy(provider: string): boolean {
+  return BUILTIN_OAUTH_PROVIDERS.has(normalizeManagementOAuthProviderKey(provider));
+}
+
+export function validateOAuthLoginProxy(
+  provider: string,
+  value: string
+): OAuthProxyValidation | undefined {
+  if (!requiresOAuthSocksProxy(provider) && !value.trim()) return undefined;
+  return validateOAuthSocksProxy(value);
+}
 
 /** Validate the proxy before a login attempt can send any management request. */
 export function validateOAuthSocksProxy(value: string): OAuthProxyValidation | undefined {
