@@ -1,0 +1,514 @@
+diff --git a/src/features/oauth/OAuthPage.tsx b/src/features/oauth/OAuthPage.tsx
+--- a/src/features/oauth/OAuthPage.tsx
++++ b/src/features/oauth/OAuthPage.tsx
+@@ -12,6 +12,7 @@
+ import { OAuthFlowDialog, type DialogHeading } from './components/OAuthFlowDialog';
+ import { VertexImportDialog } from './components/VertexImportDialog';
+ import { SiwcBindDialog } from './components/SiwcBindDialog';
++import { KiroImportDialog } from './components/KiroImportDialog';
+ import {
+   useOAuthFlows,
+   usePluginOAuthProviders,
+@@ -52,6 +53,13 @@
+   const [dialog, setDialog] = useState<DialogTarget | null>(null);
+   const [dialogOpen, setDialogOpen] = useState(false);
+   const [siwcOpen, setSiwcOpen] = useState(false);
++  const [kiroOpen, setKiroOpen] = useState(false);
++  const [kiroKey, setKiroKey] = useState(0);
++  const kiroCard = pluginProviders.find((provider) => provider.kiroJSONImport);
++  const openKiroImport = () => {
++    setKiroKey((key) => key + 1);
++    setKiroOpen(true);
++  };
+   // Remount on opening, while retaining the closed dialog through its exit animation.
+   const [siwcKey, setSiwcKey] = useState(0);
+   const openSiwc = () => {
+@@ -113,7 +121,7 @@
+     focusedRef.current = card.id;
+     setDialog({ kind: 'oauth', id: card.id });
+     setDialogOpen(true);
+-    // Opening a tile never starts OAuth before the account proxy is entered.
++    // Opening a tile shows login options without starting an OAuth session.
+   };
+
+   const openVertex = () => {
+@@ -200,18 +208,27 @@
+           {t('auth_login.other_login_methods')}
+         </h2>
+         <div className={styles.grid}>
++          {kiroCard && (
++            <ProviderTile
++              label={t('kiro_import.title')}
++              caption={t('kiro_import.tile_caption')}
++              icon={kiroCard.icon}
++              index={regularCards.length + tileIndexOffset}
++              onOpen={openKiroImport}
++            />
++          )}
+           <ProviderTile
+             label={VERTEX_LABEL}
+             caption={t('vertex_import.file_label')}
+             icon={iconVertex}
+-            index={regularCards.length + tileIndexOffset}
++            index={regularCards.length + tileIndexOffset + (kiroCard ? 1 : 0)}
+             onOpen={openVertex}
+           />
+           <ProviderTile
+             label={t('siwc.bind')}
+             caption={t('siwc.tile_caption')}
+             icon={iconCodex}
+-            index={regularCards.length + tileIndexOffset + 1}
++            index={regularCards.length + tileIndexOffset + (kiroCard ? 1 : 0) + 1}
+             onOpen={openSiwc}
+           />
+         </div>
+@@ -252,6 +269,17 @@
+         onClose={closeDialog}
+       />
+
++      {kiroCard && kiroKey > 0 && (
++        <KiroImportDialog
++          key={kiroKey}
++          open={kiroOpen}
++          icon={kiroCard.icon}
++          onClose={() => setKiroOpen(false)}
++          onCredentialAdded={flows.recordCredentialAdded}
++          onViewAuthFiles={viewAuthFiles}
++        />
++      )}
++
+       {siwcKey > 0 && (
+         <SiwcBindDialog
+           key={siwcKey}
+diff --git a/src/features/oauth/providers.ts b/src/features/oauth/providers.ts
+--- a/src/features/oauth/providers.ts
++++ b/src/features/oauth/providers.ts
+@@ -1,4 +1,5 @@
+ import type { BuiltInOAuthProvider } from '@/services/api';
++import { supportsKiroJSONImport } from '@/services/api/kiroImport';
+ import { getPluginTitle, resolvePluginAssetURL } from '@/features/plugins/pluginResources';
+ import {
+   KIMI_CHINESE_AFFILIATE_URL,
+@@ -9,7 +10,7 @@
+ import iconCodex from '@/assets/icons/codex.svg';
+ import iconClaude from '@/assets/icons/claude.svg';
+ import iconAntigravity from '@/assets/icons/antigravity.svg';
+-// 赞助卡用的 App 图标版：K 与蓝点等比内缩进方块，蓝点不再顶出圆角
++// Sponsor tiles use the app icon with the K and blue dot inset inside its corners.
+ import iconKimiTileBlack from '@/assets/icons/kimi-tile-black.svg';
+ import iconKimiTileWhite from '@/assets/icons/kimi-tile-white.svg';
+ import iconGrok from '@/assets/icons/grok.svg';
+@@ -19,24 +20,21 @@
+
+ export type ThemedIcon = string | { light: string; dark: string };
+
+-/** 设备码流程会返回 user_code；浏览器流程依赖回调（本地自动 / 远程手动粘贴）。 */
++/** Device flows return user_code; browser flows complete through callbacks. */
+ export type OAuthFlowKind = 'device' | 'browser';
+
+ export interface BuiltInOAuthProviderCard {
+   kind: 'builtin';
+   id: BuiltInOAuthProvider;
+-  /** 磁贴短名：品牌名是常量（与仪表盘 providerLabel 一致），区域站点走 i18n。 */
++  /** Brand labels match the dashboard; regional labels use translation keys. */
+   label: string | { key: string };
+-  /** 对话框标题，沿用 `auth_login.<id>_oauth_title`。 */
++  /** Dialog title key under auth_login. */
+   titleKey: string;
+   icon: ThemedIcon;
+   flow: OAuthFlowKind;
+-  /** 区分同品牌的不同站点，磁贴副行展示。 */
++  /** Regional site shown in the tile caption. */
+   domain?: string;
+-  /**
+-   * 赞助商：同品牌的各站点合并进画廊首行的一张品牌卡，每站一个登录入口 + 开放平台注册链接
+-   * （目前是 Kimi 国内站 / 国际站）。`siteKey` 是卡内站点短名（品牌名由卡片标题承载）。
+-   */
++  /** Sponsored regional sites share a brand card, with a login and registration link each. */
+   sponsor?: SponsorSite;
+ }
+
+@@ -47,6 +45,7 @@
+
+ export interface PluginOAuthProviderCard {
+   kind: 'plugin';
++  kiroJSONImport?: true;
+   id: string;
+   title: string;
+   icon: string;
+@@ -54,7 +53,7 @@
+
+ export type OAuthProviderCard = BuiltInOAuthProviderCard | PluginOAuthProviderCard;
+
+-/** 展示顺序即数组顺序：赞助商（Kimi 两站）置首，其余沿用原有次序。 */
++/** Display sponsors first, then preserve the existing provider order. */
+ export const OAUTH_PROVIDERS: BuiltInOAuthProviderCard[] = [
+   {
+     kind: 'builtin',
+@@ -131,7 +130,7 @@
+
+ const BUILTIN_PROVIDER_IDS = new Set<string>(OAUTH_PROVIDERS.map((provider) => provider.id));
+
+-/** 后端接受手动回调提交的内置提供商；插件提供商一律允许。 */
++/** Built-in providers with manual callbacks; all plugin providers allow them. */
+ export const CALLBACK_SUPPORTED = new Set<string>([
+   'codex',
+   'anthropic',
+@@ -151,10 +150,7 @@
+ export const resolveThemedIcon = (icon: ThemedIcon, theme: 'light' | 'dark'): string =>
+   typeof icon === 'string' ? icon : icon[theme];
+
+-/**
+- * 一个插件可能声明多个登录入口（各自带标题与图标），每个入口一张卡；
+- * v8.0.49 之前只有单个 `oauth_provider`，那时仍然只出一张卡。
+- */
++/** Render a card per declared login entry, including older single-provider plugins. */
+ export const buildPluginOAuthProviderCards = (
+   plugins: PluginListEntry[],
+   apiBase: string
+@@ -177,6 +173,9 @@
+         {
+           kind: 'plugin' as const,
+           id: provider,
++          ...(provider === 'kiro' && supportsKiroJSONImport(plugin)
++            ? { kiroJSONImport: true as const }
++            : {}),
+           title: entry?.name?.trim() || pluginTitle,
+           icon: resolvePluginAssetURL(entry?.logo?.trim() || pluginLogo, apiBase),
+         },
+diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
+--- a/src/i18n/locales/en.json
++++ b/src/i18n/locales/en.json
+@@ -1,4 +1,44 @@
+ {
++  "kiro_import": {
++    "title": "Kiro JSON import",
++    "tile_caption": "Paste one account or an account array",
++    "description": "Paste Kiro credentials to validate and save accounts through the plugin. Both camelCase and snake_case fields are supported. No SOCKS proxy is required; plugin/global networking applies.",
++    "json_label": "Credential JSON",
++    "account_type": "Default account type",
++    "defaults_hint": "These defaults apply when an entry has no account type or region. Use the original AWS region. The accessToken field is optional; login obtains a fresh token. Credentials are kept only for this import.",
++    "preview": "Preview accounts",
++    "entry_error": "Account {{index}}: {{message}}",
++    "detected": "Detected {{count}} accounts. Review before importing.",
++    "progress": "Importing… {{success}} of {{total}} accounts saved.",
++    "finished": "Finished: {{success}} of {{total}} accounts saved.",
++    "account": "Account",
++    "account_number": "Account {{index}}",
++    "status": "Status",
++    "import": "Import accounts",
++    "importing": "Importing…",
++    "another": "Import more",
++    "edit": "Paste again",
++    "status_pending": "Ready",
++    "status_importing": "Validating and saving",
++    "status_success": "Saved",
++    "status_failed": "Failed",
++    "status_uncertain": "Check result",
++    "failure_unavailable": "The Kiro multi-method plugin is unavailable or incompatible. Check that it is enabled and updated.",
++    "failure_start": "Could not start login. Check the CPA connection and plugin.",
++    "failure_connect": "Credential validation failed. Check the refresh token, client registration and region.",
++    "failure_save": "CPA could not save this account. Check the server and authentication files.",
++    "failure_uncertain": "The save result could not be confirmed. Check authentication files before retrying this account.",
++    "error_json": "Enter valid JSON.",
++    "error_shape": "Use a single account object or a non-empty array of account objects.",
++    "error_limit": "Limit: 50 accounts, 1 MiB total and 60 KiB per account.",
++    "error_field": "{{field}} must be a string; camelCase and snake_case values must agree.",
++    "error_refresh": "refreshToken / refresh_token is required.",
++    "error_registration": "Provide clientId and clientSecret together. Both may be omitted only for Kiro desktop refresh tokens.",
++    "error_region": "Enter a valid AWS region, such as us-east-1.",
++    "error_start_url": "IAM Identity Center requires a valid HTTPS Start URL, such as https://company.awsapps.com/start.",
++    "error_method": "This importer supports AWS Builder ID and IAM Identity Center refresh credentials. Use the plugin page for External IDP JSON.",
++    "error_duplicate": "The same refresh token appears more than once. Keep one entry per account."
++  },
+   "common": {
+     "login": "Login",
+     "logout": "Logout",
+diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
+--- a/src/i18n/locales/zh-CN.json
++++ b/src/i18n/locales/zh-CN.json
+@@ -1,4 +1,44 @@
+ {
++  "kiro_import": {
++    "title": "Kiro JSON 导入",
++    "tile_caption": "粘贴单个账户或账户数组",
++    "description": "粘贴 Kiro 凭证，通过插件逐个验证并保存。支持驼峰和下划线字段名，无需填写 SOCKS，使用插件或全局网络设置。",
++    "json_label": "凭证 JSON",
++    "account_type": "默认账户类型",
++    "defaults_hint": "条目没有账户类型或区域时使用下方默认值。请使用原账户的 AWS 区域。accessToken 可省略，登录时会获取新令牌。凭证仅在本次导入期间保留。",
++    "preview": "预览账户",
++    "entry_error": "第 {{index}} 个账户：{{message}}",
++    "detected": "识别到 {{count}} 个账户，请核对后开始导入。",
++    "progress": "正在导入，已保存 {{success}} / {{total}} 个账户。",
++    "finished": "处理完成：已保存 {{success}} / {{total}} 个账户。",
++    "account": "账户",
++    "account_number": "账户 {{index}}",
++    "status": "状态",
++    "import": "开始导入",
++    "importing": "正在导入…",
++    "another": "继续导入",
++    "edit": "重新粘贴",
++    "status_pending": "待导入",
++    "status_importing": "正在验证并保存",
++    "status_success": "已保存",
++    "status_failed": "失败",
++    "status_uncertain": "需确认结果",
++    "failure_unavailable": "Kiro 多方式登录插件不可用或不兼容，请检查是否已启用并更新。",
++    "failure_start": "无法启动登录，请检查 CPA 连接和插件状态。",
++    "failure_connect": "凭证验证失败，请检查 Refresh token、客户端注册信息和区域。",
++    "failure_save": "CPA 未能保存此账户，请检查服务端和认证文件。",
++    "failure_uncertain": "无法确认是否保存成功，请先查看认证文件，再决定是否重试此账户。",
++    "error_json": "请输入合法的 JSON。",
++    "error_shape": "请粘贴单个账户对象，或非空的账户对象数组。",
++    "error_limit": "最多 50 个账户，总大小不超过 1 MiB，单个账户不超过 60 KiB。",
++    "error_field": "{{field}} 必须是字符串；驼峰和下划线字段同时存在时，值必须一致。",
++    "error_refresh": "缺少 refreshToken / refresh_token。",
++    "error_registration": "clientId 和 clientSecret 必须成对提供，仅 Kiro 桌面刷新令牌可同时省略。",
++    "error_region": "请输入有效的 AWS 区域，例如 us-east-1。",
++    "error_start_url": "IAM Identity Center 需要有效的 HTTPS Start URL，例如 https://company.awsapps.com/start。",
++    "error_method": "此入口支持 AWS Builder ID 和 IAM Identity Center 刷新凭证；External IDP JSON 请使用插件原登录页面。",
++    "error_duplicate": "存在重复的 Refresh token，每个账户保留一条即可。"
++  },
+   "common": {
+     "login": "登录",
+     "logout": "登出",
+diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
+--- a/src/i18n/locales/zh-TW.json
++++ b/src/i18n/locales/zh-TW.json
+@@ -1,4 +1,44 @@
+ {
++  "kiro_import": {
++    "title": "Kiro JSON 匯入",
++    "tile_caption": "貼上單一帳戶或帳戶陣列",
++    "description": "貼上 Kiro 憑證，透過外掛逐一驗證並儲存。支援駝峰與底線欄位名稱，無需填寫 SOCKS，使用外掛或全域網路設定。",
++    "json_label": "憑證 JSON",
++    "account_type": "預設帳戶類型",
++    "defaults_hint": "項目未提供帳戶類型或區域時使用下方預設值。請使用原帳戶的 AWS 區域。accessToken 可省略，登入時會取得新權杖。憑證僅保留於本次匯入期間。",
++    "preview": "預覽帳戶",
++    "entry_error": "第 {{index}} 個帳戶：{{message}}",
++    "detected": "辨識到 {{count}} 個帳戶，請確認後開始匯入。",
++    "progress": "正在匯入，已儲存 {{success}} / {{total}} 個帳戶。",
++    "finished": "處理完成：已儲存 {{success}} / {{total}} 個帳戶。",
++    "account": "帳戶",
++    "account_number": "帳戶 {{index}}",
++    "status": "狀態",
++    "import": "開始匯入",
++    "importing": "正在匯入…",
++    "another": "繼續匯入",
++    "edit": "重新貼上",
++    "status_pending": "待匯入",
++    "status_importing": "正在驗證並儲存",
++    "status_success": "已儲存",
++    "status_failed": "失敗",
++    "status_uncertain": "需確認結果",
++    "failure_unavailable": "Kiro 多方式登入外掛無法使用或不相容，請確認已啟用並更新。",
++    "failure_start": "無法啟動登入，請檢查 CPA 連線與外掛狀態。",
++    "failure_connect": "憑證驗證失敗，請檢查 Refresh token、用戶端註冊資訊與區域。",
++    "failure_save": "CPA 無法儲存此帳戶，請檢查伺服器與認證檔案。",
++    "failure_uncertain": "無法確認是否儲存成功，請先查看認證檔案，再決定是否重試此帳戶。",
++    "error_json": "請輸入有效的 JSON。",
++    "error_shape": "請貼上單一帳戶物件，或非空的帳戶物件陣列。",
++    "error_limit": "最多 50 個帳戶，總大小不超過 1 MiB，單一帳戶不超過 60 KiB。",
++    "error_field": "{{field}} 必須為字串；駝峰與底線欄位同時存在時，值必須一致。",
++    "error_refresh": "缺少 refreshToken / refresh_token。",
++    "error_registration": "clientId 與 clientSecret 必須成對提供，僅 Kiro 桌面刷新權杖可同時省略。",
++    "error_region": "請輸入有效的 AWS 區域，例如 us-east-1。",
++    "error_start_url": "IAM Identity Center 需要有效的 HTTPS Start URL，例如 https://company.awsapps.com/start。",
++    "error_method": "此入口支援 AWS Builder ID 與 IAM Identity Center 刷新憑證；External IDP JSON 請使用外掛原登入頁面。",
++    "error_duplicate": "存在重複的 Refresh token，每個帳戶保留一筆即可。"
++  },
+   "common": {
+     "login": "登入",
+     "logout": "登出",
+diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
+--- a/src/i18n/locales/ru.json
++++ b/src/i18n/locales/ru.json
+@@ -1,4 +1,44 @@
+ {
++  "kiro_import": {
++    "title": "Импорт Kiro JSON",
++    "tile_caption": "Один аккаунт или массив аккаунтов",
++    "description": "Вставьте учётные данные Kiro для проверки и сохранения через плагин. Поддерживаются camelCase и snake_case. SOCKS не обязателен: действуют настройки сети плагина или сервера.",
++    "json_label": "JSON учётных данных",
++    "account_type": "Тип аккаунта по умолчанию",
++    "defaults_hint": "Значения по умолчанию применяются, если в записи нет типа аккаунта или региона. Укажите исходный регион AWS. accessToken необязателен: при входе будет получен новый токен. Данные хранятся только на время импорта.",
++    "preview": "Предпросмотр",
++    "entry_error": "Аккаунт {{index}}: {{message}}",
++    "detected": "Найдено аккаунтов: {{count}}. Проверьте их перед импортом.",
++    "progress": "Импорт… Сохранено {{success}} из {{total}}.",
++    "finished": "Готово: сохранено {{success}} из {{total}}.",
++    "account": "Аккаунт",
++    "account_number": "Аккаунт {{index}}",
++    "status": "Статус",
++    "import": "Импортировать",
++    "importing": "Импорт…",
++    "another": "Импортировать ещё",
++    "edit": "Вставить заново",
++    "status_pending": "Готов к импорту",
++    "status_importing": "Проверка и сохранение",
++    "status_success": "Сохранён",
++    "status_failed": "Ошибка",
++    "status_uncertain": "Проверьте результат",
++    "failure_unavailable": "Плагин Kiro с несколькими способами входа недоступен или несовместим. Проверьте, включён ли он и обновлён ли.",
++    "failure_start": "Не удалось начать вход. Проверьте подключение к CPA и плагин.",
++    "failure_connect": "Проверка учётных данных не удалась. Проверьте refresh token, регистрацию клиента и регион.",
++    "failure_save": "CPA не смог сохранить аккаунт. Проверьте сервер и файлы авторизации.",
++    "failure_uncertain": "Результат сохранения неизвестен. Перед повторной попыткой проверьте файлы авторизации.",
++    "error_json": "Введите корректный JSON.",
++    "error_shape": "Нужен объект аккаунта или непустой массив объектов аккаунтов.",
++    "error_limit": "Лимит: 50 аккаунтов, всего 1 МиБ и 60 КиБ на аккаунт.",
++    "error_field": "{{field}} должен быть строкой; значения camelCase и snake_case должны совпадать.",
++    "error_refresh": "Требуется refreshToken / refresh_token.",
++    "error_registration": "Укажите clientId и clientSecret вместе. Оба можно пропустить только для desktop refresh token Kiro.",
++    "error_region": "Укажите корректный регион AWS, например us-east-1.",
++    "error_start_url": "IAM Identity Center требует HTTPS Start URL, например https://company.awsapps.com/start.",
++    "error_method": "Этот импорт поддерживает refresh-данные AWS Builder ID и IAM Identity Center. Для External IDP JSON используйте страницу плагина.",
++    "error_duplicate": "Refresh token повторяется. Оставьте одну запись на аккаунт."
++  },
+   "common": {
+     "login": "Войти",
+     "logout": "Выйти",
+diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
+--- a/src/i18n/locales/vi.json
++++ b/src/i18n/locales/vi.json
+@@ -1,4 +1,44 @@
+ {
++  "kiro_import": {
++    "title": "Nhập Kiro JSON",
++    "tile_caption": "Dán một tài khoản hoặc mảng tài khoản",
++    "description": "Dán thông tin Kiro để xác minh và lưu từng tài khoản qua plugin. Hỗ trợ camelCase và snake_case. Không bắt buộc SOCKS; dùng cấu hình mạng của plugin hoặc cấu hình chung.",
++    "json_label": "JSON thông tin xác thực",
++    "account_type": "Loại tài khoản mặc định",
++    "defaults_hint": "Dùng giá trị mặc định khi mục không có loại tài khoản hoặc vùng. Chọn vùng AWS ban đầu. accessToken không bắt buộc vì đăng nhập sẽ lấy token mới. Dữ liệu chỉ được giữ trong lần nhập này.",
++    "preview": "Xem trước",
++    "entry_error": "Tài khoản {{index}}: {{message}}",
++    "detected": "Nhận diện {{count}} tài khoản. Kiểm tra trước khi nhập.",
++    "progress": "Đang nhập… Đã lưu {{success}} / {{total}} tài khoản.",
++    "finished": "Hoàn tất: đã lưu {{success}} / {{total}} tài khoản.",
++    "account": "Tài khoản",
++    "account_number": "Tài khoản {{index}}",
++    "status": "Trạng thái",
++    "import": "Nhập tài khoản",
++    "importing": "Đang nhập…",
++    "another": "Nhập thêm",
++    "edit": "Dán lại",
++    "status_pending": "Chờ nhập",
++    "status_importing": "Đang xác minh và lưu",
++    "status_success": "Đã lưu",
++    "status_failed": "Thất bại",
++    "status_uncertain": "Cần kiểm tra",
++    "failure_unavailable": "Plugin Kiro đa phương thức không khả dụng hoặc không tương thích. Kiểm tra plugin đã bật và cập nhật.",
++    "failure_start": "Không thể bắt đầu đăng nhập. Kiểm tra kết nối CPA và plugin.",
++    "failure_connect": "Xác minh thất bại. Kiểm tra refresh token, thông tin đăng ký client và vùng.",
++    "failure_save": "CPA không thể lưu tài khoản. Kiểm tra máy chủ và tệp xác thực.",
++    "failure_uncertain": "Chưa xác nhận được kết quả lưu. Kiểm tra tệp xác thực trước khi thử lại tài khoản này.",
++    "error_json": "Nhập JSON hợp lệ.",
++    "error_shape": "Dùng một đối tượng tài khoản hoặc mảng đối tượng không rỗng.",
++    "error_limit": "Giới hạn: 50 tài khoản, tổng 1 MiB và 60 KiB cho mỗi tài khoản.",
++    "error_field": "{{field}} phải là chuỗi; giá trị camelCase và snake_case phải khớp nhau.",
++    "error_refresh": "Cần có refreshToken / refresh_token.",
++    "error_registration": "Cung cấp cả clientId và clientSecret. Chỉ refresh token Kiro desktop mới được bỏ trống cả hai.",
++    "error_region": "Nhập vùng AWS hợp lệ, ví dụ us-east-1.",
++    "error_start_url": "IAM Identity Center cần HTTPS Start URL hợp lệ, ví dụ https://company.awsapps.com/start.",
++    "error_method": "Chỉ hỗ trợ thông tin refresh của AWS Builder ID và IAM Identity Center. Dùng trang plugin cho External IDP JSON.",
++    "error_duplicate": "Refresh token bị trùng. Chỉ giữ một mục cho mỗi tài khoản."
++  },
+   "common": {
+     "login": "Đăng nhập",
+     "logout": "Đăng xuất",
+diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
+--- a/src/i18n/locales/ko.json
++++ b/src/i18n/locales/ko.json
+@@ -1,4 +1,44 @@
+ {
++  "kiro_import": {
++    "title": "Kiro JSON 가져오기",
++    "tile_caption": "계정 하나 또는 계정 배열 붙여넣기",
++    "description": "Kiro 자격 증명을 붙여넣으면 플러그인을 통해 계정별로 검증하고 저장합니다. camelCase와 snake_case를 지원합니다. SOCKS는 필수가 아니며 플러그인 또는 전역 네트워크 설정을 사용합니다.",
++    "json_label": "자격 증명 JSON",
++    "account_type": "기본 계정 유형",
++    "defaults_hint": "항목에 계정 유형이나 리전이 없으면 기본값을 사용합니다. 원래 AWS 리전을 선택하세요. accessToken은 선택 사항이며 로그인 시 새 토큰을 받습니다. 자격 증명은 이번 가져오기 동안만 보관합니다.",
++    "preview": "계정 미리보기",
++    "entry_error": "계정 {{index}}: {{message}}",
++    "detected": "계정 {{count}}개를 인식했습니다. 가져오기 전에 확인하세요.",
++    "progress": "가져오는 중… {{total}}개 중 {{success}}개 저장됨.",
++    "finished": "완료: {{total}}개 중 {{success}}개 저장됨.",
++    "account": "계정",
++    "account_number": "계정 {{index}}",
++    "status": "상태",
++    "import": "가져오기",
++    "importing": "가져오는 중…",
++    "another": "추가로 가져오기",
++    "edit": "다시 붙여넣기",
++    "status_pending": "대기 중",
++    "status_importing": "검증 및 저장 중",
++    "status_success": "저장됨",
++    "status_failed": "실패",
++    "status_uncertain": "결과 확인 필요",
++    "failure_unavailable": "Kiro 다중 로그인 플러그인을 사용할 수 없거나 호환되지 않습니다. 활성화 및 업데이트 여부를 확인하세요.",
++    "failure_start": "로그인을 시작할 수 없습니다. CPA 연결과 플러그인을 확인하세요.",
++    "failure_connect": "자격 증명 검증에 실패했습니다. Refresh token, 클라이언트 등록 정보 및 리전을 확인하세요.",
++    "failure_save": "CPA가 계정을 저장하지 못했습니다. 서버와 인증 파일을 확인하세요.",
++    "failure_uncertain": "저장 결과를 확인할 수 없습니다. 이 계정을 다시 시도하기 전에 인증 파일을 확인하세요.",
++    "error_json": "올바른 JSON을 입력하세요.",
++    "error_shape": "계정 객체 하나 또는 비어 있지 않은 계정 객체 배열을 사용하세요.",
++    "error_limit": "제한: 계정 50개, 전체 1 MiB, 계정당 60 KiB.",
++    "error_field": "{{field}}는 문자열이어야 하며 camelCase와 snake_case 값이 일치해야 합니다.",
++    "error_refresh": "refreshToken / refresh_token이 필요합니다.",
++    "error_registration": "clientId와 clientSecret을 함께 입력하세요. Kiro 데스크톱 Refresh token만 둘 다 생략할 수 있습니다.",
++    "error_region": "us-east-1과 같은 올바른 AWS 리전을 입력하세요.",
++    "error_start_url": "IAM Identity Center에는 https://company.awsapps.com/start와 같은 HTTPS Start URL이 필요합니다.",
++    "error_method": "AWS Builder ID 및 IAM Identity Center 갱신 자격 증명을 지원합니다. External IDP JSON은 플러그인 페이지를 사용하세요.",
++    "error_duplicate": "Refresh token이 중복됩니다. 계정당 한 항목만 남겨주세요."
++  },
+   "common": {
+     "login": "로그인",
+     "logout": "로그아웃",
+diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
+--- a/src/i18n/locales/tr.json
++++ b/src/i18n/locales/tr.json
+@@ -1,4 +1,44 @@
+ {
++  "kiro_import": {
++    "title": "Kiro JSON içe aktar",
++    "tile_caption": "Tek hesap veya hesap dizisi yapıştırın",
++    "description": "Kiro kimlik bilgilerini yapıştırın; eklenti her hesabı doğrulayıp kaydeder. camelCase ve snake_case desteklenir. SOCKS zorunlu değildir; eklenti veya genel ağ ayarları kullanılır.",
++    "json_label": "Kimlik bilgisi JSON",
++    "account_type": "Varsayılan hesap türü",
++    "defaults_hint": "Kayıtta hesap türü veya bölge yoksa bu değerler kullanılır. Asıl AWS bölgesini seçin. accessToken isteğe bağlıdır; girişte yeni token alınır. Bilgiler yalnızca bu içe aktarma sırasında tutulur.",
++    "preview": "Hesapları önizle",
++    "entry_error": "Hesap {{index}}: {{message}}",
++    "detected": "{{count}} hesap bulundu. İçe aktarmadan önce kontrol edin.",
++    "progress": "İçe aktarılıyor… {{total}} hesaptan {{success}} tanesi kaydedildi.",
++    "finished": "Tamamlandı: {{total}} hesaptan {{success}} tanesi kaydedildi.",
++    "account": "Hesap",
++    "account_number": "Hesap {{index}}",
++    "status": "Durum",
++    "import": "Hesapları içe aktar",
++    "importing": "İçe aktarılıyor…",
++    "another": "Daha fazla aktar",
++    "edit": "Yeniden yapıştır",
++    "status_pending": "Hazır",
++    "status_importing": "Doğrulanıyor ve kaydediliyor",
++    "status_success": "Kaydedildi",
++    "status_failed": "Başarısız",
++    "status_uncertain": "Sonucu kontrol edin",
++    "failure_unavailable": "Çok yöntemli Kiro eklentisi kullanılamıyor veya uyumsuz. Etkin ve güncel olduğunu kontrol edin.",
++    "failure_start": "Giriş başlatılamadı. CPA bağlantısını ve eklentiyi kontrol edin.",
++    "failure_connect": "Kimlik bilgileri doğrulanamadı. Refresh token, istemci kaydı ve bölgeyi kontrol edin.",
++    "failure_save": "CPA hesabı kaydedemedi. Sunucuyu ve kimlik doğrulama dosyalarını kontrol edin.",
++    "failure_uncertain": "Kaydetme sonucu doğrulanamadı. Bu hesabı yeniden denemeden önce kimlik doğrulama dosyalarını kontrol edin.",
++    "error_json": "Geçerli JSON girin.",
++    "error_shape": "Tek hesap nesnesi veya boş olmayan hesap nesnesi dizisi kullanın.",
++    "error_limit": "Sınır: 50 hesap, toplam 1 MiB ve hesap başına 60 KiB.",
++    "error_field": "{{field}} bir metin olmalıdır; camelCase ve snake_case değerleri aynı olmalıdır.",
++    "error_refresh": "refreshToken / refresh_token gereklidir.",
++    "error_registration": "clientId ve clientSecret birlikte verilmelidir. Yalnızca Kiro masaüstü refresh token için ikisi de boş olabilir.",
++    "error_region": "us-east-1 gibi geçerli bir AWS bölgesi girin.",
++    "error_start_url": "IAM Identity Center için https://company.awsapps.com/start gibi geçerli bir HTTPS Start URL gerekir.",
++    "error_method": "AWS Builder ID ve IAM Identity Center yenileme bilgileri desteklenir. External IDP JSON için eklenti sayfasını kullanın.",
++    "error_duplicate": "Aynı refresh token birden fazla kez var. Her hesap için tek kayıt bırakın."
++  },
+   "common": {
+     "login": "Giriş",
+     "logout": "Çıkış",
