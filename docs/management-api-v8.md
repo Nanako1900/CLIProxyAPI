@@ -149,7 +149,7 @@ retain the corresponding business operation's fields.
 | `/credentials/refresh` | POST | Refresh credentials. |
 | `/credentials/verify` | POST | Run an operator-triggered, account-pinned inference verification using an isolated session and minimal 1-token prompt. |
 | `/oauth/import?provider=vertex` | POST | Import a Vertex service account using a multipart `file` upload. |
-| `/oauth/auth-url?provider=<provider>` | GET, POST | Start built-in or plugin OAuth (supports `name`/`auth_index` for targeted credential recovery and optional `verify` opt-in). |
+| `/oauth/auth-url` | POST; GET for targeted recovery | Start built-in or plugin OAuth with a required account SOCKS proxy for new sessions; supports `name`/`auth_index` recovery and optional `verify`. |
 | `/oauth/siwc/bind` | POST | Start SIWC binding to an existing file-backed Codex OAuth credential. |
 | `/oauth/siwc/status` | GET | Read local SIWC credential status (`off`, `valid`, or `invalid`). |
 | `/oauth/status?state=<state>` | GET | Get login status. |
@@ -163,18 +163,28 @@ retain the corresponding business operation's fields.
 
 ## OAuth
 
-The login URL is shared by all providers. Set the required `provider` query
-parameter to `claude`, `codex`, `antigravity`, `kimi`, `kimi-ai`, `xai`, `devin`,
+The login endpoint is shared by all providers. Set the `provider` JSON field to
+`claude`, `codex`, `antigravity`, `kimi`, `kimi-ai`, `xai`, `devin`,
 `meta`, or a registered plugin provider ID. For example:
 
 ```http
-GET /v8/management/oauth/auth-url?provider=codex
+POST /v8/management/oauth/auth-url
 Authorization: Bearer <management-key>
+Content-Type: application/json
+
+{"provider":"codex","is_webui":true,"proxy_url":"socks5h://user:password@proxy.example.com:1080"}
 ```
 
-Keep any provider-specific login parameters in the query string. To target recovery
+New account sessions require a valid SOCKS5/SOCKS5H `proxy_url` in the POST body;
+query-string proxies, missing proxies, HTTP proxies, and direct mode are rejected.
+The session proxy is used for provider requests and saved with the credential before
+activation. This does not configure the user's browser proxy. See
+[OAuth account proxies](oauth-account-proxies.md) for routing and User-Agent scope.
+
+Provider-specific login parameters can also be passed in the POST body. To target recovery
 at a specific existing credential, pass `name` (or `auth_index`) via query parameter
-or POST JSON body; authenticating a different account will be rejected rather than
+or POST JSON body. Targeted recovery inherits the saved account proxy when no
+session proxy is provided; authenticating a different account will be rejected rather than
 overwriting or clearing the target credential's recovery state. By default, post-login
 inference verification is not executed automatically to avoid unexpected token
 consumption; operators may explicitly opt in by passing `verify: true` (and optional
@@ -292,8 +302,8 @@ operations in this release.
 
 The `/v0/management` endpoints keep their original paths and payloads, including
 provider-specific OAuth login URLs, callbacks, status queries, and cancellation.
-For example, `GET /v0/management/codex-auth-url` and
-`GET /v8/management/oauth/auth-url?provider=codex` start the same login flow.
+New v8 account sessions require a SOCKS proxy in the POST body. The deprecated
+v0 login routes retain their original behavior.
 
 Legacy flat configuration endpoints such as `/debug`, `/request-retry`, and
 `/codex-api-key` exist under `/v0/management` only.

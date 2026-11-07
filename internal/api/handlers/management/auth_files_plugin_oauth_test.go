@@ -394,7 +394,7 @@ func TestV8PluginOAuthUsesIndependentCallback(t *testing.T) {
 	h := NewHandlerWithoutConfigFilePath(&config.Config{AuthDir: t.TempDir(), Port: 8317}, nil)
 	h.SetPluginHost(host)
 	router := gin.New()
-	router.GET("/v8/management/oauth/auth-url", h.StartOAuthV8)
+	router.POST("/v8/management/oauth/auth-url", h.StartOAuthV8)
 	for _, tc := range []struct {
 		query    string
 		metadata map[string]any
@@ -403,7 +403,7 @@ func TestV8PluginOAuthUsesIndependentCallback(t *testing.T) {
 		{"provider=%20CUSTOM-SSO%20", nil},
 	} {
 		response := httptest.NewRecorder()
-		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v8/management/oauth/auth-url?"+tc.query, nil))
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v8/management/oauth/auth-url?"+tc.query, strings.NewReader(`{"proxy_url":"socks5://127.0.0.1:1080"}`)))
 		if response.Code != http.StatusOK {
 			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 		}
@@ -412,7 +412,7 @@ func TestV8PluginOAuthUsesIndependentCallback(t *testing.T) {
 		}
 	}
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v8/management/oauth/auth-url?provider=unknown", nil))
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v8/management/oauth/auth-url?provider=unknown", strings.NewReader(`{"proxy_url":"socks5://127.0.0.1:1080"}`)))
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("unknown provider status=%d", response.Code)
 	}
@@ -518,7 +518,7 @@ func TestV8PluginMultiPortalOAuthListLoginPollAndRelogin(t *testing.T) {
 
 	// Start and complete login via second portal (zcode-bigmodel)
 	startRec := httptest.NewRecorder()
-	router.ServeHTTP(startRec, httptest.NewRequest(http.MethodGet, "/v8/management/oauth/auth-url?provider=zcode-bigmodel", nil))
+	router.ServeHTTP(startRec, httptest.NewRequest(http.MethodPost, "/v8/management/oauth/auth-url?provider=zcode-bigmodel", strings.NewReader(`{"proxy_url":"socks5://127.0.0.1:1080"}`)))
 	if startRec.Code != http.StatusOK {
 		t.Fatalf("start zcode-bigmodel status=%d body=%s", startRec.Code, startRec.Body.String())
 	}

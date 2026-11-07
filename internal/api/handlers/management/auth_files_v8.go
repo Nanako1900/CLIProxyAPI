@@ -116,6 +116,39 @@ func validateOAuthSessionProxyURL(raw string) (string, error) {
 	return trimmed, nil
 }
 
+// New accounts must choose their own SOCKS route before any OAuth work starts.
+// Existing credentials retain their saved route when they are reauthenticated.
+func validateNewOAuthSOCKSProxy(raw string) error {
+	proxyURL, errValidate := validateOAuthSessionProxyURL(raw)
+	if errValidate != nil || proxyURL == "" {
+		return fmt.Errorf("proxy_url is required: use socks5:// or socks5h://host:port")
+	}
+	setting, errParse := proxyutil.Parse(proxyURL)
+	if errParse != nil || setting.URL == nil || (setting.URL.Scheme != "socks5" && setting.URL.Scheme != "socks5h") {
+		return fmt.Errorf("proxy_url must use socks5:// or socks5h://host:port")
+	}
+	return nil
+}
+
+func oauthAccountProxyURL(auth *coreauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	if proxyURL := strings.TrimSpace(auth.ProxyURL); proxyURL != "" {
+		return proxyURL
+	}
+	proxyURL, _ := auth.Metadata["proxy_url"].(string)
+	return strings.TrimSpace(proxyURL)
+}
+
+func validateSavedOAuthProxyURL(raw string) (string, error) {
+	setting, errParse := proxyutil.Parse(raw)
+	if errParse == nil && setting.Mode == proxyutil.ModeDirect {
+		return "direct", nil
+	}
+	return validateOAuthSessionProxyURL(raw)
+}
+
 func applySessionProxyToAuthRecord(record *coreauth.Auth, proxyURL string) {
 	proxyURL = strings.TrimSpace(proxyURL)
 	if record == nil || proxyURL == "" {
@@ -379,6 +412,16 @@ func (h *Handler) StartOAuthV8(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "provider does not match target credential"})
 			return
 		}
+		if oauthSessionProxyURLFromContext(c) == "" {
+			proxyURL, errProxy := validateSavedOAuthProxyURL(oauthAccountProxyURL(effectiveTargetAuth))
+			if errProxy != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "target credential has an invalid proxy_url"})
+				return
+			}
+			if proxyURL != "" {
+				c.Set(oauthSessionProxyURLContextKey, proxyURL)
+			}
+		}
 		targetEmail, targetAccountID := authIdentityEmailAndAccountID(effectiveTargetAuth)
 		targetOrgID := authIdentityOrganizationID(effectiveTargetAuth)
 		targetProvider := h.resolveTargetOAuthProvider(effectiveTargetAuth)
@@ -396,6 +439,11 @@ func (h *Handler) StartOAuthV8(c *gin.Context) {
 			VerifyAfterLogin: verifyAfterLogin,
 			VerifyModel:      verifyModel,
 		})
+	} else if provider != "" {
+		if errProxy := validateNewOAuthSOCKSProxy(oauthSessionProxyURLFromContext(c)); errProxy != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": errProxy.Error()})
+			return
+		}
 	}
 
 	c.Set(oauthSessionProviderContextKey, provider)

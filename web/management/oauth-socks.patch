@@ -1,0 +1,656 @@
+diff --git a/src/services/api/oauth.ts b/src/services/api/oauth.ts
+--- a/src/services/api/oauth.ts
++++ b/src/services/api/oauth.ts
+@@ -3,6 +3,7 @@
+  */
+
+ import { apiClient } from './client';
++import { validateOAuthSocksProxy } from '@/features/oauth/socksProxy';
+ import {
+   isManagementOAuthProviderKey,
+   normalizeManagementOAuthProviderKey,
+@@ -50,16 +51,19 @@
+   startSiwcBind: (name: string, signal?: AbortSignal) =>
+     apiClient.post<SiwcBindResponse>('/oauth/siwc/bind', { name }, signal ? { signal } : undefined),
+
+-  startAuth: (provider: string, signal?: AbortSignal) => {
++  startAuth: (provider: string, proxyUrl: string, signal?: AbortSignal) => {
++    if (validateOAuthSocksProxy(proxyUrl)) throw new Error('A valid SOCKS proxy is required');
+     const providerKey = normalizeProviderForManagementPath(provider);
+-    const params: Record<string, string | boolean> = { provider: providerKey };
+-    if (WEBUI_SUPPORTED.has(providerKey)) {
+-      params.is_webui = true;
+-    }
+-    return apiClient.get<OAuthStartResponse>('/oauth/auth-url', {
+-      params,
+-      ...(signal ? { signal } : {}),
+-    });
++    const body: Record<string, string | boolean> = {
++      provider: providerKey,
++      proxy_url: proxyUrl.trim(),
++    };
++    if (WEBUI_SUPPORTED.has(providerKey)) body.is_webui = true;
++    return apiClient.post<OAuthStartResponse>(
++      '/oauth/auth-url',
++      body,
++      signal ? { signal } : undefined
++    );
+   },
+
+   getAuthStatus: (state: string, signal?: AbortSignal) =>
+diff --git a/src/features/oauth/OAuthPage.tsx b/src/features/oauth/OAuthPage.tsx
+--- a/src/features/oauth/OAuthPage.tsx
++++ b/src/features/oauth/OAuthPage.tsx
+@@ -27,18 +27,13 @@
+ } from './providers';
+ import styles from './OAuthPage.module.scss';
+
+-/** 对话框焦点标识：Vertex 不是 OAuth 提供商，用保留 id 避免与提供商冲突。 */
++/** Vertex uses a reserved dialog ID because it is not an OAuth provider. */
+ const VERTEX_DIALOG_ID = '__vertex__';
+ const VERTEX_LABEL = 'Vertex AI';
+
+ type DialogTarget = { kind: 'oauth'; id: string } | { kind: 'vertex' };
+
+-/**
+- * OAuth 登录：提供商画廊（一屏看全）+ 聚焦的授权对话框。
+- *
+- * 点磁贴即开始登录；对话框可随时关闭，授权在后台继续，磁贴副行实时反映进度。
+- * 对话框关闭后保留最后一个目标，让退出动画期间内容不消失。
+- */
++/** Provider tiles open a proxy setup dialog; active logins can continue in the background. */
+ export function OAuthPage() {
+   const { t } = useTranslation();
+   const navigate = useNavigate();
+@@ -57,7 +52,7 @@
+   const [dialog, setDialog] = useState<DialogTarget | null>(null);
+   const [dialogOpen, setDialogOpen] = useState(false);
+   const [siwcOpen, setSiwcOpen] = useState(false);
+-  // 每次打开换新 key 重新挂载（全新选择与会话）；关闭后保持挂载，让退出动画走完
++  // Remount on opening, while retaining the closed dialog through its exit animation.
+   const [siwcKey, setSiwcKey] = useState(0);
+   const openSiwc = () => {
+     setSiwcKey((key) => key + 1);
+@@ -118,8 +113,7 @@
+     focusedRef.current = card.id;
+     setDialog({ kind: 'oauth', id: card.id });
+     setDialogOpen(true);
+-    // 已有进行中/失败/刚成功的尝试 → 只是重新打开查看；否则立即开始登录
+-    if (!flows.states[card.id]?.status) void flows.startAuth(card.id);
++    // Opening a tile never starts OAuth before the account proxy is entered.
+   };
+
+   const openVertex = () => {
+@@ -142,7 +136,7 @@
+   const providerCount = providerCards.length;
+   const sponsorCards = providerCards.filter(isSponsor);
+   const regularCards = providerCards.filter((card) => !isSponsor(card));
+-  // 赞助商卡占级联的第 0 位，其余磁贴顺延
++  // The sponsor card precedes the other tiles in the reveal sequence.
+   const tileIndexOffset = sponsorCards.length > 0 ? 1 : 0;
+
+   const sponsorSites: SponsorCardSite[] = sponsorCards.map((card) => {
+@@ -185,7 +179,7 @@
+         addedCount={flows.addedCount}
+       />
+
+-      {/* 赞助商独占首行：一张品牌卡收拢两站入口，其余提供商在下方紧凑网格 */}
++      {/* Group sponsored regional entries before the other provider tiles. */}
+       {sponsorCards.length > 0 && (
+         <SponsorCard
+           title={KIMI_DISPLAY_NAME}
+@@ -233,6 +227,7 @@
+           supportsCallback={supportsManualCallback(dialogCard)}
+           sponsor={sponsorOf(dialogCard)}
+           onStart={() => void flows.startAuth(dialogCard.id)}
++          onProxyChange={(value) => flows.setProxyInput(dialogCard.id, value)}
+           onCancel={() => void flows.cancelAuth(dialogCard.id)}
+           onCallbackChange={(value) => flows.setCallbackInput(dialogCard.id, value)}
+           onCallbackSubmit={() => void flows.submitCallback(dialogCard.id)}
+diff --git a/src/features/oauth/hooks/useOAuthFlows.ts b/src/features/oauth/hooks/useOAuthFlows.ts
+--- a/src/features/oauth/hooks/useOAuthFlows.ts
++++ b/src/features/oauth/hooks/useOAuthFlows.ts
+@@ -7,6 +7,7 @@
+ import { createOAuthAttempts, type OAuthAttempt } from '../oauthAttempts';
+ import { validateDevinCallback } from '../devinOAuth';
+ import { resolveCallbackUrl } from '../callbackUrl';
++import { validateOAuthSocksProxy, type OAuthProxyValidation } from '../socksProxy';
+ import {
+   buildPluginOAuthProviderCards,
+   type OAuthProviderCard,
+@@ -14,6 +15,8 @@
+ } from '../providers';
+
+ export interface ProviderFlowState {
++  proxyUrl?: string;
++  proxyValidation?: OAuthProxyValidation;
+   url?: string;
+   userCode?: string;
+   state?: string;
+@@ -26,16 +29,13 @@
+   callbackSubmitting?: boolean;
+   callbackStatus?: 'success' | 'error';
+   callbackError?: string;
+-  /** 本地校验失败（未提交到后端），内联展示在输入框下。 */
++  /** Local validation errors are shown below the input without a backend request. */
+   callbackValidation?: string;
+ }
+
+ interface UseOAuthFlowsOptions {
+   providerCards: OAuthProviderCard[];
+-  /**
+-   * 该提供商的对话框是否正开着。开着时结果已在对话框内联展示，不再重复弹 toast；
+-   * 成功态也会保留到对话框关闭，而不是 5 秒后自动清空。
+-   */
++  /** Focused dialogs show results inline and retain success until closed. */
+   isFocused: (provider: string) => boolean;
+ }
+
+@@ -50,7 +50,7 @@
+   return typeof error.status === 'number' ? error.status : undefined;
+ }
+
+-/** 已启用且声明 OAuth 能力的插件 → 追加到内置提供商之后。 */
++/** Append enabled OAuth-capable plugins after the built-in providers. */
+ export function usePluginOAuthProviders(apiBase: string) {
+   const [pluginProviders, setPluginProviders] = useState<PluginOAuthProviderCard[]>([]);
+
+@@ -73,15 +73,12 @@
+   return pluginProviders;
+ }
+
+-/**
+- * 每个提供商一条独立的登录尝试（attempt）：开始 → 轮询状态 → 成功/失败，
+- * 可选的手动回调提交与 Devin 会话取消。尝试失效后，已发出的请求落地也不再写状态。
+- */
++/** Each provider owns an isolated attempt; stale responses cannot overwrite a newer one. */
+ export function useOAuthFlows({ providerCards, isFocused }: UseOAuthFlowsOptions) {
+   const { t } = useTranslation();
+   const { showNotification } = useNotificationStore();
+   const [states, setStates] = useState<Record<string, ProviderFlowState>>({});
+-  /** 本次会话新增的凭证数（含 Vertex 导入），换连接时归零。 */
++  /** Count credentials added on this connection, including Vertex imports. */
+   const [addedCount, setAddedCount] = useState(0);
+   const recordCredentialAdded = useCallback(() => setAddedCount((count) => count + 1), []);
+   const attempts = useRef(
+@@ -122,7 +119,7 @@
+       : t(getAuthKey(provider, suffix));
+   };
+
+-  /** 对话框没开时，toast 是唯一的结果反馈。 */
++  /** Use notifications when the dialog is not focused. */
+   const notify = (provider: string, message: string, type: 'success' | 'error' | 'warning') => {
+     if (!isFocused(provider)) showNotification(message, type);
+   };
+@@ -147,6 +144,8 @@
+       url: undefined,
+       state: undefined,
+       status: 'success',
++      proxyUrl: undefined,
++      proxyValidation: undefined,
+       error: undefined,
+       polling: false,
+       cancelling: false,
+@@ -157,7 +156,7 @@
+       callbackError: undefined,
+       callbackValidation: undefined,
+     });
+-    // 后台完成时磁贴短暂显示「已添加」；对话框开着则保留成功页，关闭时再清。
++    // Keep success visible in the focused dialog; briefly show it on background tiles.
+     resetAttempt.schedule(() => {
+       if (!isFocused(provider)) resetProviderAttempt(provider);
+     }, SUCCESS_RESET_DELAY_MS);
+@@ -243,7 +242,26 @@
+     startPolling(provider, state, attempt);
+   };
+
++  const setProxyInput = (provider: string, value: string) => {
++    if (states[provider]?.status === 'waiting' || states[provider]?.state) return;
++    updateProviderState(provider, { proxyUrl: value, proxyValidation: undefined });
++  };
++
+   const startAuth = async (provider: string) => {
++    if (
++      states[provider]?.status === 'success' ||
++      (states[provider]?.status === 'error' && states[provider]?.url)
++    ) {
++      resetProviderAttempt(provider);
++      return;
++    }
++    const proxyUrl = states[provider]?.proxyUrl?.trim() ?? '';
++    const proxyValidation = validateOAuthSocksProxy(proxyUrl);
++    if (proxyValidation) {
++      updateProviderState(provider, { proxyValidation });
++      return;
++    }
++    if (states[provider]?.polling) return;
+     // A network error can stop polling while the server is still waiting. Require
+     // explicit cancellation before replacing that Devin session.
+     if (provider === 'devin' && states[provider]?.state) return;
+@@ -264,7 +282,7 @@
+       callbackSubmitting: false,
+     });
+     try {
+-      const res = await oauthApi.startAuth(provider, attempt.signal);
++      const res = await oauthApi.startAuth(provider, proxyUrl, attempt.signal);
+       if (!attempt.isCurrent()) return;
+       if (!res.state) {
+         const message = t('auth_login.missing_state');
+@@ -384,7 +402,7 @@
+     }
+   };
+
+-  /** 关闭对话框时收起成功页，磁贴回到可再次登录的初始态。 */
++  /** Dismissing success resets the tile for another login. */
+   const dismissSuccess = (provider: string) => {
+     if (states[provider]?.status === 'success') resetProviderAttempt(provider);
+   };
+@@ -395,6 +413,7 @@
+     recordCredentialAdded,
+     providerText,
+     startAuth,
++    setProxyInput,
+     cancelAuth,
+     submitCallback,
+     setCallbackInput,
+diff --git a/src/features/oauth/components/OAuthFlowDialog.tsx b/src/features/oauth/components/OAuthFlowDialog.tsx
+--- a/src/features/oauth/components/OAuthFlowDialog.tsx
++++ b/src/features/oauth/components/OAuthFlowDialog.tsx
+@@ -1,6 +1,7 @@
+ import { useId, type ReactNode } from 'react';
+ import { useTranslation } from 'react-i18next';
+ import { Modal } from '@/components/ui/Modal';
++import { OAuthProxyInput } from './OAuthProxyInput';
+ import { IconExternalLink, IconLoader2 } from '@/components/ui/icons';
+ import type { ProviderFlowState } from '../hooks/useOAuthFlows';
+ import { resolveFlowView, splitAuthUrl, type FlowView } from '../flowView';
+@@ -33,12 +34,13 @@
+   providerId: string;
+   heading: DialogHeading;
+   state: ProviderFlowState;
+-  /** 提供商专属文案：`auth_login.<id>_<suffix>` 或插件模板。 */
++  /** Provider-specific labels or plugin templates. */
+   text: (suffix: string) => string;
+   supportsCallback: boolean;
+-  /** 赞助商：品牌蓝主按钮 + 提示行里的注册链接。 */
++  /** Sponsor styling and registration link. */
+   sponsor?: { url: string; label: string };
+   onStart: () => void;
++  onProxyChange: (value: string) => void;
+   onCancel: () => void;
+   onCallbackChange: (value: string) => void;
+   onCallbackSubmit: () => void;
+@@ -104,11 +106,21 @@
+             {text('oauth_status_error')} {state.error || ''}
+           </div>
+         )}
+-        <div>
+-          <button type="button" className={styles.primary} onClick={onStart}>
+-            {view === 'failed' ? t('auth_login.restart_login') : text('oauth_button')}
++        <form
++          onSubmit={(event) => {
++            event.preventDefault();
++            onStart();
++          }}
++        >
++          <OAuthProxyInput
++            value={state.proxyUrl ?? ''}
++            error={state.proxyValidation}
++            onChange={props.onProxyChange}
++          />
++          <button type="submit" className={styles.primary} disabled={!state.proxyUrl?.trim()}>
++            {t('auth_login.socks_start')}
+           </button>
+-        </div>
++        </form>
+       </div>
+     );
+   }
+@@ -126,6 +138,7 @@
+           {t('auth_login.devin_oauth_cancel_error')} {state.cancelError}
+         </div>
+       )}
++      <p className={styles.hint}>{t('auth_login.socks_session_hint')}</p>
+       <ol className={styles.steps}>
+         <OpenStep {...props} />
+         {state.userCode && (
+@@ -304,7 +317,7 @@
+   const isDevin = providerId === 'devin';
+   const failed = state.status === 'error';
+   const generating = !failed && !state.url;
+-  // Devin 会话在服务端可能仍挂着：必须先取消才能重开
++  // Cancel a potentially pending Devin session before starting another.
+   const canCancel = isDevin && Boolean(state.state);
+
+   return (
+@@ -356,6 +369,7 @@
+       </svg>
+       <div className={styles.resultTitle}>{text('oauth_status_success')}</div>
+       <p className={styles.resultHint}>{t('auth_login.success_saved_hint')}</p>
++      <p className={styles.resultHint}>{t('auth_login.socks_saved_hint')}</p>
+       <div className={styles.resultActions}>
+         <button type="button" className={styles.secondary} onClick={onViewAuthFiles}>
+           {t('auth_login.view_auth_files')}
+diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
+--- a/src/i18n/locales/en.json
++++ b/src/i18n/locales/en.json
+@@ -820,6 +820,13 @@
+     "upgrade_required_desc": "The current server does not support the OAuth model aliases API. Please upgrade to the latest CLI Proxy API (CPA) version."
+   },
+   "auth_login": {
++    "socks_label": "Account SOCKS proxy (required)",
++    "socks_hint": "Paste a socks5:// or socks5h:// address with a port. CPA uses it for OAuth and saves it with the account. Your browser must be configured separately to use the same exit IP.",
++    "socks_required": "Paste a SOCKS proxy before starting login.",
++    "socks_invalid": "Use socks5:// or socks5h://host:port (1–65535), optionally with username and password. Do not include a path, query, or fragment.",
++    "socks_start": "Create login with SOCKS",
++    "socks_session_hint": "This login uses the SOCKS proxy you supplied. Open the authorization page in a browser using the same exit IP; this page cannot change browser proxy settings.",
++    "socks_saved_hint": "The SOCKS proxy has been saved with this account.",
+     "devin_oauth_cancel": "Cancel Devin Login",
+     "devin_oauth_cancelled": "Devin login cancelled.",
+     "devin_oauth_cancel_error": "Failed to cancel Devin login:",
+diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
+--- a/src/i18n/locales/zh-CN.json
++++ b/src/i18n/locales/zh-CN.json
+@@ -818,6 +818,13 @@
+     "upgrade_required_desc": "当前服务器版本不支持 OAuth 模型别名功能，请升级到最新版本的 CPA（CLI Proxy API）后重试。"
+   },
+   "auth_login": {
++    "socks_label": "账号 SOCKS 代理（必填）",
++    "socks_hint": "粘贴带端口的 socks5:// 或 socks5h:// 地址。CPA 将用它完成 OAuth，并自动保存到账号。登录用的浏览器需要单独配置为同一出口 IP。",
++    "socks_required": "请先粘贴 SOCKS 代理，再开始登录。",
++    "socks_invalid": "请输入 socks5:// 或 socks5h://主机:端口（1–65535），可包含用户名和密码；不要附加路径、查询参数或片段。",
++    "socks_start": "使用 SOCKS 创建登录",
++    "socks_session_hint": "本次登录已绑定所填 SOCKS。请在使用同一出口 IP 的浏览器中打开授权页；此页面无法修改浏览器代理。",
++    "socks_saved_hint": "SOCKS 代理已随凭据自动保存到此账号。",
+     "devin_oauth_cancel": "取消 Devin 登录",
+     "devin_oauth_cancelled": "已取消 Devin 登录。",
+     "devin_oauth_cancel_error": "取消 Devin 登录失败：",
+diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
+--- a/src/i18n/locales/zh-TW.json
++++ b/src/i18n/locales/zh-TW.json
+@@ -818,6 +818,13 @@
+     "upgrade_required_desc": "目前伺服器版本不支援 OAuth 模型別名功能，請升級到最新版本的 CPA（CLI Proxy API）後重試。"
+   },
+   "auth_login": {
++    "socks_label": "帳號 SOCKS 代理（必填）",
++    "socks_hint": "貼上含連接埠的 socks5:// 或 socks5h:// 位址。CPA 會用它完成 OAuth，並自動儲存至帳號。登入用的瀏覽器需另外設定為相同出口 IP。",
++    "socks_required": "請先貼上 SOCKS 代理，再開始登入。",
++    "socks_invalid": "請輸入 socks5:// 或 socks5h://主機:連接埠（1–65535），可包含使用者名稱與密碼；不要附加路徑、查詢參數或片段。",
++    "socks_start": "使用 SOCKS 建立登入",
++    "socks_session_hint": "本次登入已綁定填入的 SOCKS。請在使用相同出口 IP 的瀏覽器開啟授權頁；此頁面無法修改瀏覽器代理。",
++    "socks_saved_hint": "SOCKS 代理已隨憑證自動儲存至此帳號。",
+     "devin_oauth_cancel": "取消 Devin 登入",
+     "devin_oauth_cancelled": "已取消 Devin 登入。",
+     "devin_oauth_cancel_error": "取消 Devin 登入失敗：",
+diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
+--- a/src/i18n/locales/ru.json
++++ b/src/i18n/locales/ru.json
+@@ -823,6 +823,13 @@
+     "upgrade_required_desc": "Текущая версия сервера не поддерживает API псевдонимов моделей OAuth. Обновите CLI Proxy API (CPA) до последней версии."
+   },
+   "auth_login": {
++    "socks_label": "SOCKS-прокси аккаунта (обязательно)",
++    "socks_hint": "Вставьте адрес socks5:// или socks5h:// с портом. CPA использует его для OAuth и сохранит в аккаунте. Настройте браузер отдельно для того же внешнего IP.",
++    "socks_required": "Перед входом укажите SOCKS-прокси.",
++    "socks_invalid": "Укажите socks5:// или socks5h://хост:порт (1–65535), при необходимости с логином и паролем. Путь, параметры и фрагмент не допускаются.",
++    "socks_start": "Начать вход через SOCKS",
++    "socks_session_hint": "Для этого входа используется указанный SOCKS-прокси. Откройте страницу авторизации в браузере с тем же внешним IP; эта страница не меняет настройки прокси браузера.",
++    "socks_saved_hint": "SOCKS-прокси сохранён в этом аккаунте.",
+     "devin_oauth_cancel": "Отменить вход в Devin",
+     "devin_oauth_cancelled": "Вход в Devin отменён.",
+     "devin_oauth_cancel_error": "Не удалось отменить вход в Devin:",
+diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
+--- a/src/i18n/locales/vi.json
++++ b/src/i18n/locales/vi.json
+@@ -776,6 +776,13 @@
+     "remove_mapping": "Xóa ánh xạ bí danh {{number}}"
+   },
+   "auth_login": {
++    "socks_label": "Proxy SOCKS của tài khoản (bắt buộc)",
++    "socks_hint": "Dán địa chỉ socks5:// hoặc socks5h:// kèm cổng. CPA dùng proxy cho OAuth và lưu vào tài khoản. Cần cấu hình riêng trình duyệt để dùng cùng IP đầu ra.",
++    "socks_required": "Dán proxy SOCKS trước khi đăng nhập.",
++    "socks_invalid": "Dùng socks5:// hoặc socks5h://máy-chủ:cổng (1–65535), có thể kèm tên người dùng và mật khẩu. Không thêm đường dẫn, tham số truy vấn hoặc đoạn định danh.",
++    "socks_start": "Tạo đăng nhập qua SOCKS",
++    "socks_session_hint": "Lần đăng nhập này dùng proxy SOCKS đã nhập. Mở trang xác thực trong trình duyệt có cùng IP đầu ra; trang này không thể thay đổi proxy của trình duyệt.",
++    "socks_saved_hint": "Proxy SOCKS đã được lưu vào tài khoản này.",
+     "recommended_provider_section": "Provider đề xuất",
+     "recommended_provider_badge": "Provider đề xuất",
+     "other_oauth_providers": "Provider OAuth khác",
+diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
+--- a/src/i18n/locales/ko.json
++++ b/src/i18n/locales/ko.json
+@@ -820,6 +820,13 @@
+     "upgrade_required_desc": "현재 서버는 OAuth 모델 별칭 API를 지원하지 않습니다. 최신 버전의 CLI Proxy API(CPA)로 업그레이드하세요."
+   },
+   "auth_login": {
++    "socks_label": "계정 SOCKS 프록시 (필수)",
++    "socks_hint": "포트가 포함된 socks5:// 또는 socks5h:// 주소를 붙여 넣으세요. CPA는 OAuth에 사용하고 계정에 저장합니다. 브라우저도 같은 외부 IP를 사용하도록 별도로 설정해야 합니다.",
++    "socks_required": "로그인 전에 SOCKS 프록시를 입력하세요.",
++    "socks_invalid": "socks5:// 또는 socks5h://호스트:포트 (1–65535)를 입력하세요. 사용자 이름과 비밀번호는 선택 사항이며 경로, 쿼리, 프래그먼트는 허용되지 않습니다.",
++    "socks_start": "SOCKS로 로그인 시작",
++    "socks_session_hint": "이 로그인은 입력한 SOCKS 프록시를 사용합니다. 같은 외부 IP를 사용하는 브라우저에서 인증 페이지를 여세요. 이 페이지는 브라우저의 프록시 설정을 변경할 수 없습니다.",
++    "socks_saved_hint": "SOCKS 프록시가 이 계정에 저장되었습니다.",
+     "devin_oauth_cancel": "Devin 로그인 취소",
+     "devin_oauth_cancelled": "Devin 로그인이 취소되었습니다.",
+     "devin_oauth_cancel_error": "Devin 로그인 취소 실패:",
+diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
+--- a/src/i18n/locales/tr.json
++++ b/src/i18n/locales/tr.json
+@@ -820,6 +820,13 @@
+     "upgrade_required_desc": "Geçerli Sunucu OAuth Model Takma Adları API Değerini Desteklemiyor. En Son CLIProxyAPI (CPA) Sürümüne Yükselt."
+   },
+   "auth_login": {
++    "socks_label": "Hesap SOCKS vekil sunucusu (zorunlu)",
++    "socks_hint": "Port içeren bir socks5:// veya socks5h:// adresi yapıştırın. CPA bunu OAuth için kullanır ve hesaba kaydeder. Tarayıcıyı aynı çıkış IP adresini kullanacak şekilde ayrıca yapılandırın.",
++    "socks_required": "Oturum açmadan önce bir SOCKS vekil sunucusu girin.",
++    "socks_invalid": "socks5:// veya socks5h://sunucu:port (1–65535) kullanın. Kullanıcı adı ve parola isteğe bağlıdır; yol, sorgu veya parça eklemeyin.",
++    "socks_start": "SOCKS ile oturum açmayı başlat",
++    "socks_session_hint": "Bu oturum açma işlemi girdiğiniz SOCKS vekil sunucusunu kullanır. Yetkilendirme sayfasını aynı çıkış IP adresine sahip bir tarayıcıda açın; bu sayfa tarayıcının vekil sunucu ayarlarını değiştiremez.",
++    "socks_saved_hint": "SOCKS vekil sunucusu bu hesaba kaydedildi.",
+     "devin_oauth_cancel": "Devin Girişini İptal Et",
+     "devin_oauth_cancelled": "Devin Girişi İptal Edildi.",
+     "devin_oauth_cancel_error": "Devin Girişi İptal Edilemedi:",
+diff --git a/tests/devinOAuthApi.test.ts b/tests/devinOAuthApi.test.ts
+--- a/tests/devinOAuthApi.test.ts
++++ b/tests/devinOAuthApi.test.ts
+@@ -10,14 +10,16 @@
+       url: 'https://app.devin.ai/auth/cli/continue',
+       state: 'test-state',
+     };
+-    const get = spyOn(apiClient, 'get').mockResolvedValue(response);
++    const post = spyOn(apiClient, 'post').mockResolvedValue(response);
+     try {
+-      expect(await oauthApi.startAuth(provider)).toEqual(response);
+-      expect(get).toHaveBeenCalledWith('/oauth/auth-url', {
+-        params: { provider: 'devin', is_webui: true },
+-      });
++      expect(await oauthApi.startAuth(provider, 'socks5://localhost:1080')).toEqual(response);
++      expect(post).toHaveBeenCalledWith(
++        '/oauth/auth-url',
++        { provider: 'devin', is_webui: true, proxy_url: 'socks5://localhost:1080' },
++        undefined
++      );
+     } finally {
+-      get.mockRestore();
++      post.mockRestore();
+     }
+   });
+
+@@ -64,11 +66,12 @@
+     const post = spyOn(apiClient, 'post').mockResolvedValue({});
+     const remove = spyOn(apiClient, 'delete').mockResolvedValue({});
+     try {
+-      await oauthApi.startAuth('devin', signal);
+-      expect(get).toHaveBeenLastCalledWith('/oauth/auth-url', {
+-        params: { provider: 'devin', is_webui: true },
+-        signal,
+-      });
++      await oauthApi.startAuth('devin', 'socks5://localhost:1080', signal);
++      expect(post).toHaveBeenLastCalledWith(
++        '/oauth/auth-url',
++        { provider: 'devin', is_webui: true, proxy_url: 'socks5://localhost:1080' },
++        { signal }
++      );
+       await oauthApi.getAuthStatus('test-state', signal);
+       expect(get).toHaveBeenLastCalledWith('/oauth/status', {
+         params: { state: 'test-state' },
+diff --git a/tests/devinOAuthUi.test.ts b/tests/devinOAuthUi.test.ts
+--- a/tests/devinOAuthUi.test.ts
++++ b/tests/devinOAuthUi.test.ts
+@@ -44,6 +44,7 @@
+             text: (suffix: string) => i18n.t(`auth_login.devin_${suffix}`),
+             supportsCallback: true,
+             onStart: () => {},
++            onProxyChange: () => {},
+             onCancel: () => {},
+             onCallbackChange: () => {},
+             onCallbackSubmit: () => {},
+@@ -55,12 +56,12 @@
+
+     const idle = renderDialog({});
+     expect(idle).toContain('Devin OAuth');
+-    expect(idle).toContain('Start Devin Login');
++    expect(idle).toContain(en.auth_login.socks_start);
+     expect(idle).toContain('v7.3.1');
+     expect(idle).toContain('five minutes');
+     expect(idle).not.toContain('auth_login.devin_');
+
+-    // 服务端会话还挂着（网络失败停了轮询）：必须先取消，回调输入锁定
++    // A pending server session must be cancelled before retrying; callback input is locked.
+     const stalled = renderDialog({
+       status: 'error',
+       error: 'network',
+diff --git a/tests/kimiOAuth.test.ts b/tests/kimiOAuth.test.ts
+--- a/tests/kimiOAuth.test.ts
++++ b/tests/kimiOAuth.test.ts
+@@ -11,21 +11,23 @@
+
+ describe('Kimi regional login', () => {
+   test('uses separate provider parameters and preserves cancellation', async () => {
+-    const get = spyOn(apiClient, 'get').mockResolvedValue({ url: 'https://example.test' });
++    const post = spyOn(apiClient, 'post').mockResolvedValue({ url: 'https://example.test' });
+     const controller = new AbortController();
+     try {
+-      await oauthApi.startAuth('kimi', controller.signal);
+-      expect(get).toHaveBeenLastCalledWith('/oauth/auth-url', {
+-        params: { provider: 'kimi' },
+-        signal: controller.signal,
+-      });
+-      await oauthApi.startAuth('kimi-ai', controller.signal);
+-      expect(get).toHaveBeenLastCalledWith('/oauth/auth-url', {
+-        params: { provider: 'kimi-ai' },
+-        signal: controller.signal,
+-      });
++      await oauthApi.startAuth('kimi', 'socks5://localhost:1080', controller.signal);
++      expect(post).toHaveBeenLastCalledWith(
++        '/oauth/auth-url',
++        { provider: 'kimi', proxy_url: 'socks5://localhost:1080' },
++        { signal: controller.signal }
++      );
++      await oauthApi.startAuth('kimi-ai', 'socks5://localhost:1080', controller.signal);
++      expect(post).toHaveBeenLastCalledWith(
++        '/oauth/auth-url',
++        { provider: 'kimi-ai', proxy_url: 'socks5://localhost:1080' },
++        { signal: controller.signal }
++      );
+     } finally {
+-      get.mockRestore();
++      post.mockRestore();
+     }
+   });
+
+@@ -49,7 +51,7 @@
+     expect(kimiAi).toMatchObject({ flow: 'device', domain: 'kimi.ai' });
+     expect(kimi?.sponsor?.signUpUrl).toBe(KIMI_CHINESE_AFFILIATE_URL);
+     expect(kimiAi?.sponsor?.signUpUrl).toBe(KIMI_INTERNATIONAL_AFFILIATE_URL);
+-    // 赞助商：两站排在画廊最前，且只有它们是赞助位
++    // Only the two regional Kimi entries occupy sponsor slots.
+     expect(OAUTH_PROVIDERS.slice(0, 2).map((provider) => provider.id)).toEqual(['kimi', 'kimi-ai']);
+     expect(OAUTH_PROVIDERS.filter(isSponsor).map((provider) => provider.id)).toEqual([
+       'kimi',
+diff --git a/tests/metaOAuthProvider.test.ts b/tests/metaOAuthProvider.test.ts
+--- a/tests/metaOAuthProvider.test.ts
++++ b/tests/metaOAuthProvider.test.ts
+@@ -39,17 +39,24 @@
+       expires_in: 600,
+     };
+     const signal = new AbortController().signal;
+-    const get = spyOn(apiClient, 'get').mockResolvedValue(response);
++    const post = spyOn(apiClient, 'post').mockResolvedValue(response);
+     try {
+-      expect(await oauthApi.startAuth(provider, signal)).toEqual(response);
+-      expect(get).toHaveBeenLastCalledWith('/oauth/auth-url', {
+-        params: { provider: 'meta' },
+-        signal,
+-      });
+-      await oauthApi.startAuth('Muse');
+-      expect(get).toHaveBeenLastCalledWith('/oauth/auth-url', { params: { provider: 'meta' } });
++      expect(await oauthApi.startAuth(provider, 'socks5://localhost:1080', signal)).toEqual(
++        response
++      );
++      expect(post).toHaveBeenLastCalledWith(
++        '/oauth/auth-url',
++        { provider: 'meta', proxy_url: 'socks5://localhost:1080' },
++        { signal }
++      );
++      await oauthApi.startAuth('Muse', 'socks5://localhost:1080');
++      expect(post).toHaveBeenLastCalledWith(
++        '/oauth/auth-url',
++        { provider: 'meta', proxy_url: 'socks5://localhost:1080' },
++        undefined
++      );
+     } finally {
+-      get.mockRestore();
++      post.mockRestore();
+     }
+   });
+
+@@ -85,7 +92,7 @@
+       'userCode: res.user_code'
+     );
+
+-    // 设备码步骤真实渲染：码本身 + 复制按钮，且没有回调步骤
++    // Render the device code and copy button without a manual callback step.
+     const markup = renderToStaticMarkup(
+       createElement(
+         I18nextProvider,
+@@ -98,6 +105,7 @@
+           text: (suffix: string) => i18n.t(`auth_login.meta_${suffix}`),
+           supportsCallback: false,
+           onStart: () => {},
++          onProxyChange: () => {},
+           onCancel: () => {},
+           onCallbackChange: () => {},
+           onCallbackSubmit: () => {},
+diff --git a/tests/managementV8Api.test.ts b/tests/managementV8Api.test.ts
+--- a/tests/managementV8Api.test.ts
++++ b/tests/managementV8Api.test.ts
+@@ -235,16 +235,19 @@
+   });
+
+   test('OAuth maps UI anthropic to claude and plugins use the shared login route', async () => {
+-    const get = mock('get');
+     const post = mock('post');
+-    await oauthApi.startAuth('anthropic');
+-    expect(get).toHaveBeenLastCalledWith('/oauth/auth-url', {
+-      params: { provider: 'claude', is_webui: true },
+-    });
+-    await oauthApi.startAuth('example-plugin');
+-    expect(get).toHaveBeenLastCalledWith('/oauth/auth-url', {
+-      params: { provider: 'example-plugin' },
+-    });
++    await oauthApi.startAuth('anthropic', 'socks5://localhost:1080');
++    expect(post).toHaveBeenLastCalledWith(
++      '/oauth/auth-url',
++      { provider: 'claude', is_webui: true, proxy_url: 'socks5://localhost:1080' },
++      undefined
++    );
++    await oauthApi.startAuth('example-plugin', 'socks5://localhost:1080');
++    expect(post).toHaveBeenLastCalledWith(
++      '/oauth/auth-url',
++      { provider: 'example-plugin', proxy_url: 'socks5://localhost:1080' },
++      undefined
++    );
+     await oauthApi.submitCallback('anthropic', 'https://example.test/callback?code=test');
+     expect(post).toHaveBeenLastCalledWith(
+       '/oauth/callback',

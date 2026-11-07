@@ -254,6 +254,14 @@ func (h *Handler) StartSIWCBind(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to initialize SIWC authorization"})
 		return
 	}
+	if proxyURL := oauthAccountProxyURL(target); proxyURL != "" {
+		validatedProxy, errProxy := validateSavedOAuthProxyURL(proxyURL)
+		if errProxy != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "target credential has an invalid proxy_url"})
+			return
+		}
+		cfg.ProxyURL = validatedProxy
+	}
 	var service siwcOAuthService = codex.NewCodexAuth(cfg)
 	if factory != nil {
 		service = factory(cfg)

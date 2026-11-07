@@ -91,17 +91,11 @@ func (s *proxyTestCodexOAuthService) CreateTokenStorage(bundle *codex.CodexAuthB
 	}
 }
 
-func startForwardHTTPProxy(t *testing.T, hits *atomic.Int32, expectedProxyAuth string, dropBody bool) *httptest.Server {
+func startForwardSOCKSProxy(t *testing.T, hits *atomic.Int32, expectedProxyAuth string, dropBody bool) *httptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return newOAuthSOCKSTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		if expectedProxyAuth != "" {
-			if r.Header.Get("Proxy-Authorization") != expectedProxyAuth {
-				w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
-				http.Error(w, "proxy auth required", http.StatusProxyAuthRequired)
-				return
-			}
-		}
+
 		if dropBody {
 			if hj, ok := w.(http.Hijacker); ok {
 				conn, _, errHijack := hj.Hijack()
@@ -113,7 +107,7 @@ func startForwardHTTPProxy(t *testing.T, hits *atomic.Int32, expectedProxyAuth s
 			http.Error(w, "proxy dropped connection", http.StatusBadGateway)
 			return
 		}
-		outReq, errReq := http.NewRequestWithContext(r.Context(), r.Method, r.RequestURI, r.Body)
+		outReq, errReq := http.NewRequestWithContext(r.Context(), r.Method, r.URL.String(), r.Body)
 		if errReq != nil {
 			http.Error(w, errReq.Error(), http.StatusBadGateway)
 			return
@@ -136,7 +130,7 @@ func startForwardHTTPProxy(t *testing.T, hits *atomic.Int32, expectedProxyAuth s
 		}
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
-	}))
+	}), expectedProxyAuth)
 }
 
 func waitForOAuthStatus(t *testing.T, router http.Handler, state string) oauthStatusResponse {
@@ -158,7 +152,8 @@ func TestStartOAuthV8SessionScopedProxyAndPersistence(t *testing.T) {
 
 	var proxyHits atomic.Int32
 	var directHits atomic.Int32
-	proxyServer := startForwardHTTPProxy(t, &proxyHits, "", false)
+	proxyServer := startForwardSOCKSProxy(t, &proxyHits, "fixture:proxy-test-pass", false)
+	proxyServer.URL = strings.Replace(proxyServer.URL, "://", "://fixture:proxy-test-pass@", 1)
 	defer proxyServer.Close()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -347,11 +342,11 @@ func TestStartOAuthV8ProxyFailuresDoNotFallbackDirectAndRedactCredentials(t *tes
 	}()
 
 	var authRejectHits atomic.Int32
-	authRejectProxy := startForwardHTTPProxy(t, &authRejectHits, "Basic dXNlcjpexpected-secret", false)
+	authRejectProxy := startForwardSOCKSProxy(t, &authRejectHits, "user:expected-secret", false)
 	defer authRejectProxy.Close()
 
 	var dropHits atomic.Int32
-	dropProxy := startForwardHTTPProxy(t, &dropHits, "", true)
+	dropProxy := startForwardSOCKSProxy(t, &dropHits, "", true)
 	defer dropProxy.Close()
 
 	ln, errListen := net.Listen("tcp", "127.0.0.1:0")
@@ -368,7 +363,7 @@ func TestStartOAuthV8ProxyFailuresDoNotFallbackDirectAndRedactCredentials(t *tes
 		name     string
 		proxyURL string
 	}{
-		{name: "unreachable proxy", proxyURL: "http://user:unreachable-secret-pass@" + closedAddr},
+		{name: "unreachable proxy", proxyURL: "socks5://user:unreachable-secret-pass@" + closedAddr},
 		{name: "proxy auth rejected", proxyURL: authRejectURL.String()},
 		{name: "proxy connection dropped", proxyURL: dropProxy.URL},
 	}
@@ -426,9 +421,9 @@ func TestStartOAuthV8ParallelSessionsWithDifferentProxiesOutOfOrderCallbacks(t *
 	gin.SetMode(gin.TestMode)
 
 	var hitsA, hitsB, directHits atomic.Int32
-	proxyA := startForwardHTTPProxy(t, &hitsA, "", false)
+	proxyA := startForwardSOCKSProxy(t, &hitsA, "", false)
 	defer proxyA.Close()
-	proxyB := startForwardHTTPProxy(t, &hitsB, "", false)
+	proxyB := startForwardSOCKSProxy(t, &hitsB, "", false)
 	defer proxyB.Close()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -603,7 +598,7 @@ func TestStartOAuthV8AntigravityAndPluginSessionProxyAndRestartPersistence(t *te
 	gin.SetMode(gin.TestMode)
 
 	var proxyHits, directHits atomic.Int32
-	proxyServer := startForwardHTTPProxy(t, &proxyHits, "", false)
+	proxyServer := startForwardSOCKSProxy(t, &proxyHits, "", false)
 	defer proxyServer.Close()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -799,7 +794,7 @@ func TestStartOAuthV8AntigravityProjectDiscoveryProxyFailureFailsSession(t *test
 	gin.SetMode(gin.TestMode)
 
 	var proxyHits, directHits atomic.Int32
-	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	proxyServer := newOAuthSOCKSTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proxyHits.Add(1)
 		if strings.HasSuffix(r.RequestURI, "/project") {
 			if hj, ok := w.(http.Hijacker); ok {
@@ -812,7 +807,7 @@ func TestStartOAuthV8AntigravityProjectDiscoveryProxyFailureFailsSession(t *test
 			http.Error(w, "proxy dropped on project discovery", http.StatusBadGateway)
 			return
 		}
-		outReq, errReq := http.NewRequestWithContext(r.Context(), r.Method, r.RequestURI, r.Body)
+		outReq, errReq := http.NewRequestWithContext(r.Context(), r.Method, r.URL.String(), r.Body)
 		if errReq != nil {
 			http.Error(w, errReq.Error(), http.StatusBadGateway)
 			return
@@ -832,7 +827,7 @@ func TestStartOAuthV8AntigravityProjectDiscoveryProxyFailureFailsSession(t *test
 		}
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
-	}))
+	}), "")
 	defer proxyServer.Close()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -908,7 +903,7 @@ func TestStartOAuthV8PluginPollCancelRaceDoesNotDropProxyOrSaveCancelledSession(
 	gin.SetMode(gin.TestMode)
 
 	var proxyHits, directHits atomic.Int32
-	proxyServer := startForwardHTTPProxy(t, &proxyHits, "", false)
+	proxyServer := startForwardSOCKSProxy(t, &proxyHits, "", false)
 	defer proxyServer.Close()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1148,11 +1143,11 @@ func (p *proxyRefreshTestAuthProvider) RefreshAuth(ctx context.Context, req plug
 	return pluginapi.AuthRefreshResponse{}, nil
 }
 
-func TestStartOAuthV8WithoutProxyPreservesDefaultBehaviorAndPersistedProxyRefresh(t *testing.T) {
+func TestStartOAuthV8RequiresProxyAndPersistedProxyRefresh(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	var proxyHits, directHits atomic.Int32
-	proxyServer := startForwardHTTPProxy(t, &proxyHits, "", false)
+	proxyServer := startForwardSOCKSProxy(t, &proxyHits, "", false)
 	defer proxyServer.Close()
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1185,35 +1180,14 @@ func TestStartOAuthV8WithoutProxyPreservesDefaultBehaviorAndPersistedProxyRefres
 	router.POST("/v8/management/oauth/auth-url", h.StartOAuthV8)
 	router.GET("/status", h.GetAuthStatus)
 
-	// 1. Default behavior without proxy_url override
+	// Missing proxies are rejected before a login session or upstream request exists.
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v8/management/oauth/auth-url", strings.NewReader(`{"provider":"codex"}`)))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("start status = %d, body = %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("start status = %d, want 400; body = %s", rec.Code, rec.Body.String())
 	}
-	var startResp struct {
-		State string `json:"state"`
-	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &startResp)
-	t.Cleanup(func() { CancelOAuthSession(startResp.State) })
-	if _, errWrite := WriteOAuthCallbackFileForPendingSession(authDir, "codex", startResp.State, "no-proxy", ""); errWrite != nil {
-		t.Fatalf("write callback: %v", errWrite)
-	}
-	if status := waitForOAuthStatus(t, router, startResp.State); status.Status != "ok" {
-		t.Fatalf("status = %#v, want ok", status)
-	}
-	if directHits.Load() != 1 || proxyHits.Load() != 0 {
-		t.Fatalf("without override: directHits=%d proxyHits=%d, want 1 and 0", directHits.Load(), proxyHits.Load())
-	}
-	entries, _ := os.ReadDir(authDir)
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		raw, _ := os.ReadFile(filepath.Join(authDir, e.Name()))
-		if strings.Contains(string(raw), "proxy_url") {
-			t.Fatalf("credential without session proxy should not contain proxy_url: %s", string(raw))
-		}
+	if directHits.Load() != 0 || proxyHits.Load() != 0 {
+		t.Fatal("missing proxy unexpectedly triggered an upstream request")
 	}
 
 	// 2. End-to-end OAuth login with session proxy -> persist to disk -> synthesize from disk -> production RefreshAuth()
@@ -1294,8 +1268,8 @@ func TestStartOAuthV8WithoutProxyPreservesDefaultBehaviorAndPersistedProxyRefres
 		t.Fatalf("refresh-sso poll status = %#v, want ok", pollStatus)
 	}
 	hitsAfterLogin := proxyHits.Load()
-	if hitsAfterLogin != 1 || directHits.Load() != 1 {
-		t.Fatalf("after refresh-sso login: proxyHits=%d directHits=%d, want 1 and 1", hitsAfterLogin, directHits.Load())
+	if hitsAfterLogin != 1 || directHits.Load() != 0 {
+		t.Fatalf("after refresh-sso login: proxyHits=%d directHits=%d, want 1 and 0", hitsAfterLogin, directHits.Load())
 	}
 
 	// Load the saved credential file from disk with a blank global config and fresh plugin host (simulating server restart)
@@ -1330,7 +1304,7 @@ func TestStartOAuthV8WithoutProxyPreservesDefaultBehaviorAndPersistedProxyRefres
 	if refreshedAuth == nil || refreshedAuth.ProxyURL != proxyServer.URL {
 		t.Fatalf("refreshedAuth = %#v, want ProxyURL=%q", refreshedAuth, proxyServer.URL)
 	}
-	if proxyHits.Load() != hitsAfterLogin+1 || directHits.Load() != 1 {
-		t.Fatalf("expected production RefreshAuth to route via persisted proxy: proxyHits=%d (want %d), directHits=%d (want 1)", proxyHits.Load(), hitsAfterLogin+1, directHits.Load())
+	if proxyHits.Load() != hitsAfterLogin+1 || directHits.Load() != 0 {
+		t.Fatalf("expected production RefreshAuth to route via persisted proxy: proxyHits=%d (want %d), directHits=%d (want 0)", proxyHits.Load(), hitsAfterLogin+1, directHits.Load())
 	}
 }
