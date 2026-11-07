@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/buildinfo"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/clientua"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginstore"
@@ -64,6 +65,7 @@ type Handler struct {
 	siwcOAuthFactory        func(*config.Config) siwcOAuthService
 	siwcCommitMu            sync.Mutex
 	pluginLoginSaveMu       sync.Mutex
+	clientUserAgents        *clientua.Store
 }
 
 type configReloadSnapshot struct {

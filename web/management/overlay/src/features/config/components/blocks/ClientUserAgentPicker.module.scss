@@ -1,0 +1,50 @@
+.picker {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.heading,
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.heading {
+  justify-content: space-between;
+}
+.hint {
+  color: var(--text-secondary);
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.error {
+  color: var(--error-color);
+  margin: 0;
+}
+.preview {
+  min-width: 0;
+  font-size: 12px;
+}
+.preview p {
+  color: var(--text-secondary);
+  margin: 0 0 8px;
+}
+.preview pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.importText {
+  width: 100%;
+  resize: vertical;
+  font-family: monospace;
+}

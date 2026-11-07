@@ -118,6 +118,9 @@ func autoUpdateSkipReason(cfg *config.Config) (string, bool) {
 	if cfg.RemoteManagement.DisableAutoUpdatePanel {
 		return "disable-auto-update-panel is enabled", true
 	}
+	if BundledFilePath() != "" {
+		return "management panel is bundled with this build", true
+	}
 	return "", false
 }
 
@@ -172,6 +175,9 @@ func StaticDir(configFilePath string) string {
 
 // FilePath resolves the absolute path to the management control panel asset.
 func FilePath(configFilePath string) string {
+	if bundled := BundledFilePath(); bundled != "" {
+		return bundled
+	}
 	if override := strings.TrimSpace(os.Getenv("MANAGEMENT_STATIC_PATH")); override != "" {
 		cleaned := filepath.Clean(override)
 		if strings.EqualFold(filepath.Base(cleaned), managementAssetName) {
@@ -190,6 +196,10 @@ func FilePath(configFilePath string) string {
 // EnsureLatestManagementHTML checks the latest management.html asset and updates the local copy when needed.
 // It coalesces concurrent sync attempts and returns whether the asset exists after the sync attempt.
 func EnsureLatestManagementHTML(ctx context.Context, staticDir string, proxyURL string, panelRepository string) bool {
+	if bundled := BundledFilePath(); bundled != "" {
+		info, errStat := os.Stat(bundled)
+		return errStat == nil && !info.IsDir()
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}

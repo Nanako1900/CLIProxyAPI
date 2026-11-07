@@ -21,6 +21,7 @@ import (
 	managementHandlers "github.com/router-for-me/CLIProxyAPI/v8/internal/api/handlers/management"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/api/middleware"
 	codexlive "github.com/router-for-me/CLIProxyAPI/v8/internal/client/codex/live"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/clientua"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/githubauth"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
@@ -84,7 +85,8 @@ type Server struct {
 	wsAuthEnabled atomic.Bool
 
 	// management handler
-	mgmt *managementHandlers.Handler
+	mgmt             *managementHandlers.Handler
+	clientUserAgents *clientua.Store
 
 	// pluginHost owns dynamic plugin Management API route dispatch.
 	pluginHost *pluginhost.Host
@@ -222,6 +224,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	applyClaudeToolSearchConfig(cfg)
 	// Initialize management handler
 	s.mgmt = managementHandlers.NewHandler(cfg, configFilePath, authManager)
+	s.initClientUserAgents(cfg)
 	s.mgmt.SetPluginHost(optionState.pluginHost)
 	s.mgmt.SetConfigReloadHook(optionState.configReloadHook)
 	if optionState.localPassword != "" {
@@ -454,6 +457,9 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 	if s.codexLiveHandler != nil {
 		s.codexLiveHandler.Close()
+	}
+	if errCatalog := s.clientUserAgents.Close(); errCatalog != nil {
+		log.WithError(errCatalog).Warn("flush client UA catalog at shutdown")
 	}
 	if errCloseServer != nil {
 		return fmt.Errorf("failed to shutdown HTTP server: %v", errCloseServer)
