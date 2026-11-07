@@ -29,6 +29,7 @@ tar -xzf "$archive" --strip-components=1 -C "$source_dir"
 cd "$source_dir"
 git apply "$extension_dir/native-settings.patch"
 git apply "$extension_dir/oauth-socks.patch"
+git apply "$extension_dir/kiro-json-import.patch"
 cp -R "$extension_dir/overlay/." .
 bun install --frozen-lockfile
 bun run verify
