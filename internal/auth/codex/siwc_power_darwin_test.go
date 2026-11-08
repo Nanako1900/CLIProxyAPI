@@ -65,7 +65,11 @@ func TestSIWCRefreshDoesNotConsumeGrantWhenPowerStateUnavailable(t *testing.T) {
 	previous := ReadSIWCSystemState
 	t.Cleanup(func() { ReadSIWCSystemState = previous })
 	errProbe := errors.New("power-state probe unavailable")
-	ReadSIWCSystemState = func(context.Context) ([]byte, error) { return nil, errProbe }
+	checks := 0
+	ReadSIWCSystemState = func(context.Context) ([]byte, error) {
+		checks++
+		return nil, errProbe
+	}
 	auth := &CodexAuth{httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		t.Fatal("token request sent without a known power state")
 		return nil, nil
@@ -73,5 +77,13 @@ func TestSIWCRefreshDoesNotConsumeGrantWhenPowerStateUnavailable(t *testing.T) {
 	_, errRefresh := auth.RefreshSIWCTokens(context.Background(), "refresh", "oaiapp_probe", "")
 	if !errors.Is(errRefresh, errProbe) {
 		t.Fatalf("power-state error was lost: %v", errRefresh)
+	}
+	if !errors.Is(errRefresh, ErrSIWCRefreshDeferred) {
+		t.Fatalf("unavailable power state must defer renewal without marking the credential as failed: %v", errRefresh)
+	}
+	checks = 0
+	_, errRefresh = auth.RefreshSIWCTokensWithRetry(context.Background(), "refresh", "oaiapp_probe", "", 3)
+	if !errors.Is(errRefresh, errProbe) || !errors.Is(errRefresh, ErrSIWCRefreshDeferred) || checks != 1 {
+		t.Fatalf("power-state probe failure: error = %v, checks = %d; want one deferred attempt", errRefresh, checks)
 	}
 }
