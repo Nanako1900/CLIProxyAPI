@@ -192,6 +192,7 @@ func TestNewDetachableContext_HTTPErrorsMatchParent(t *testing.T) {
 	run := func(t *testing.T, newParent func() (context.Context, func()), detachable, inBody bool) error {
 		t.Helper()
 		parent, end := newParent()
+		defer end()
 		ctx := parent
 		if detachable {
 			var release func()
@@ -204,6 +205,13 @@ func TestNewDetachableContext_HTTPErrorsMatchParent(t *testing.T) {
 		}
 		if !inBody {
 			end()
+			// AfterFunc forwards cancellation asynchronously. Wait for it so
+			// this checks error identity without racing the HTTP request.
+			select {
+			case <-ctx.Done():
+			case <-time.After(5 * time.Second):
+				t.Fatal("parent cancellation did not propagate before the request")
+			}
 			resp, errRoundTrip := transport.RoundTrip(req)
 			if errRoundTrip == nil {
 				_ = resp.Body.Close()

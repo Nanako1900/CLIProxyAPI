@@ -230,6 +230,80 @@ func TestShadowDirectoryDigestResolvesRelativePathsByWorkingDirectory(t *testing
 	}
 }
 
+func TestShadowLoadGuardCoordinatesDirectoryAliases(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		loadAlias bool
+		fallback  bool
+	}{
+		{name: "local/load-alias", loadAlias: true},
+		{name: "local/prune-alias"},
+		{name: "fallback/load-alias", loadAlias: true, fallback: true},
+		{name: "fallback/prune-alias", fallback: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			physicalDir := filepath.Join(root, "physical")
+			aliasDir := filepath.Join(root, "alias")
+			if errMkdir := os.Mkdir(physicalDir, 0o700); errMkdir != nil {
+				t.Fatal(errMkdir)
+			}
+			if errSymlink := os.Symlink(physicalDir, aliasDir); errSymlink != nil {
+				if runtime.GOOS == "windows" {
+					t.Skipf("directory symlinks unavailable: %v", errSymlink)
+				}
+				t.Fatal(errSymlink)
+			}
+			t.Cleanup(func() {
+				for _, dir := range []string{physicalDir, aliasDir} {
+					removeShadowPluginDir(filepath.Join(shadowPluginBaseDir(), shadowPluginCacheDirName, shadowDirectoryDigest(dir)))
+				}
+			})
+			if test.fallback {
+				if errWrite := os.WriteFile(filepath.Join(physicalDir, shadowPluginLocalDirName), []byte("blocker"), 0o600); errWrite != nil {
+					t.Fatal(errWrite)
+				}
+			}
+			loadDir, pruneDir := physicalDir, aliasDir
+			if test.loadAlias {
+				loadDir, pruneDir = aliasDir, physicalDir
+			}
+			ext := testPluginLibraryExtension()
+			oldPath := filepath.Join(loadDir, "alpha-v1.0.0"+ext)
+			if errWrite := os.WriteFile(oldPath, []byte("alpha-v1"), 0o600); errWrite != nil {
+				t.Fatal(errWrite)
+			}
+			shadowPath, releaseGuard, errLoad := acquireShadowPluginLoad(pluginFile{ID: "alpha", Path: oldPath, Version: "1.0.0"})
+			if errLoad != nil {
+				t.Fatal(errLoad)
+			}
+			defer releaseGuard()
+
+			// Upgrade through the other directory spelling while the old image
+			// has been published but has not yet been opened by the loader.
+			newPath := filepath.Join(pruneDir, "alpha-v2.0.0"+ext)
+			if errWrite := os.WriteFile(newPath, []byte("alpha-v2"), 0o600); errWrite != nil {
+				t.Fatal(errWrite)
+			}
+			loaded := []pluginFile{{ID: "alpha", Path: newPath, Version: "2.0.0"}}
+			if errCleanup := cleanupUnselectedPluginFiles(pruneDir, loaded); errCleanup != nil {
+				t.Fatal(errCleanup)
+			}
+			if _, errStat := os.Stat(shadowPath); errStat != nil {
+				t.Fatalf("upgrade removed a shadow protected by an alias load guard: %v", errStat)
+			}
+
+			releaseGuard()
+			if errCleanup := cleanupUnselectedPluginFiles(pruneDir, loaded); errCleanup != nil {
+				t.Fatal(errCleanup)
+			}
+			if _, errStat := os.Stat(shadowPath); !os.IsNotExist(errStat) {
+				t.Fatalf("stale shadow survived alias cleanup after releasing its guard: %v", errStat)
+			}
+		})
+	}
+}
+
 func TestShadowCopyPluginConcurrentPublishNeverUnlinksExistingTarget(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(t.TempDir(), "alpha"+testPluginLibraryExtension())

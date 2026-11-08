@@ -356,6 +356,10 @@ func shadowDirectoryDigest(dir string) string {
 	if absDir, errAbs := filepath.Abs(cleaned); errAbs == nil {
 		cleaned = filepath.Clean(absDir)
 	}
+	// Directory aliases share shadow files and must use the same cache and lock.
+	if canonicalDir, errCanonical := filepath.EvalSymlinks(cleaned); errCanonical == nil {
+		cleaned = filepath.Clean(canonicalDir)
+	}
 	sum := sha256.Sum256([]byte(cleaned))
 	return hex.EncodeToString(sum[:])[:shadowPluginDigestLength]
 }

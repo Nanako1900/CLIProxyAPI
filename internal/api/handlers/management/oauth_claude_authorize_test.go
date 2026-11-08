@@ -110,7 +110,7 @@ func TestStartOAuthV8ClaudeUsesNativeAuthorizationParameters(t *testing.T) {
 	router := gin.New()
 	router.POST("/v8/management/oauth/auth-url", handler.StartOAuthV8)
 
-	request := httptest.NewRequest(http.MethodPost, "/v8/management/oauth/auth-url", strings.NewReader(`{"provider":"claude"}`))
+	request := httptest.NewRequest(http.MethodPost, "/v8/management/oauth/auth-url", strings.NewReader(`{"provider":"claude","proxy_url":"socks5://127.0.0.1:1080"}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
