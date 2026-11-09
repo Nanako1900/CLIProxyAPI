@@ -119,6 +119,72 @@ Consecutive observations of one credential show whether a window's `reset_at_ms`
 fixed (fixed window started on first use or anchored) or moves forward with usage
 (rolling window). That determines whether staggering window starts can help at all.
 
+## Analyzing the log
+
+`cmd/quota-shadow-report` turns a shadow log into a plain-text report. Collect about a
+week of traffic first, so that weekly windows reset at least once inside the log.
+
+```bash
+go run ./cmd/quota-shadow-report -file logs/quota-shadow.jsonl > quota-report.txt
+```
+
+Without file arguments it reads `-file`, preceded by its rotation `<file>.1` when present.
+File arguments are read in the order given. Malformed lines (for example a line cut off
+by a crash) are counted and skipped.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-file` | `quota-shadow.jsonl` | Log to read when no file arguments are given |
+| `-no-rotated` | `false` | Do not read `<file>.1` first |
+| `-reset-tolerance` | `5m` | `reset_at_ms` changes up to this size count as the same reset; at least 1m, and widened automatically when the provider rounds reset times |
+| `-timeline` | `true` | Print every observed window per credential in section 5 |
+| `-strategy` | `round-robin` | Strategy that produced the log (`round-robin` or `fill-first`), used to calibrate the replay |
+| `-soft-limit-percent` | `90` | Soft limit used by the replayed shadow policy |
+| `-min-cost-samples` | `20` | Consecutive same-window observations needed to estimate a credential's cost per request |
+
+The report has six sections:
+
+1. **Agreement** between `actual` and `shadow`, for picks inside the scored pool, split by
+   `shadow_reason` and by first attempt versus failover. Picks outside the pool
+   (`actual_in_pool=false`) are counted separately because their disagreement is structural.
+2. **Soft-limited real picks**: how often the real pick was soft-limited in the shadow view,
+   and how often another candidate was not.
+3. **Outages** from `selection_error`: an episode runs from the first failed pick to the
+   next successful pick on the same route (providers and model). Reports the count, total
+   and maximum gap minutes, status codes, and the `retry_after_ms` distribution. Idle
+   clients stretch episodes, so gaps are upper bounds.
+4. **Window semantics** per credential window and per window type, from consecutive
+   observations. Within one window, `reset_at_ms` either stays put (fixed) or moves with
+   elapsed time (rolling); the drift column is reset movement per unit of observed time.
+   Observations without a reset are skipped, and so are stale ones that report an earlier
+   reset than already seen (responses completing out of order). For fixed windows,
+   transitions after an idle gap show whether the next window started on its first use
+   (allowing the first response to complete up to 15 minutes after the start) or stayed
+   anchored to the previous reset. The table also lists the nominal length, the largest
+   observed reset lead, and the spacing between resets.
+5. **Utilization and perished quota**: per credential window, the last used share and,
+   for every window whose reset passed inside the log, the peak used share and the unused
+   remainder (perished). Usage outside this proxy is invisible, so perished is an upper
+   bound. Not computed for rolling windows.
+6. **Replay** of round-robin, fill-first, and the shadow policy over the recorded request
+   arrivals, using each credential's mean observed cost per request. It runs only when
+   every credential-wide window type on a route is fixed with verified drift, has a known
+   length, and has enough observations with a measurable usage increase to estimate
+   costs. A rejected request is one that ended without a credential. Calibration compares
+   the simulation of `-strategy` with the log: rejected requests must match within 2% of
+   demand and the per-credential share of first picks within 0.10 (total variation),
+   otherwise the table is marked FAILED. When neither side ran out of credentials the
+   calibration is UNINFORMATIVE and only perished quota can be compared. When the replay
+   cannot run, the report lists why and which extra data would be needed. Even a
+   calibrated replay ignores prompt-cache loss when sessions move between credentials,
+   session affinity, and request size.
+
+Reading the result: a quota-aware strategy can only help when windows are fixed
+(section 4), some credentials let weekly quota perish while others are exhausted
+(sections 3 and 5), and the calibrated replay shows fewer or shorter outages for the
+shadow policy than for the current strategy (section 6). If all credentials use their
+weekly windows fully, the pool is capacity-bound and no ordering adds requests.
+
 ## Privacy
 
 Records contain credential IDs (usually auth file names) and quota header values, but no
