@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Account usage · CLIProxyAPI</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
+        --bg: #f6f7f9;
+        --panel: #fff;
+        --text: #18252e;
+        --muted: #667580;
+        --line: #dce2e7;
+        --accent: #006d66;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+      }
+      main {
+        max-width: 1280px;
+        margin: auto;
+        padding: 38px 28px;
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        align-items: center;
+      }
+      h1 {
+        font-size: 30px;
+        letter-spacing: -1px;
+        margin: 3px 0;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 0 0 14px;
+      }
+      p {
+        margin: 6px 0;
+        color: var(--muted);
+      }
+      .eyebrow {
+        font-size: 11px;
+        letter-spacing: 2px;
+        font-weight: 700;
+        color: var(--accent);
+      }
+      section,
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        margin-top: 22px;
+        padding: 22px;
+      }
+      .toolbar,
+      form,
+      .pager {
+        display: flex;
+        gap: 12px;
+        align-items: end;
+        flex-wrap: wrap;
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      input,
+      select,
+      button {
+        font: inherit;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel);
+        color: var(--text);
+        padding: 9px 11px;
+      }
+      input[type="password"] {
+        min-width: 250px;
+      }
+      button {
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button:hover {
+        border-color: var(--accent);
+      }
+      button.primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .grow {
+        flex: 1;
+      }
+      .table-wrap {
+        overflow: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        white-space: nowrap;
+      }
+      th {
+        text-align: left;
+        font-size: 11px;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        color: var(--muted);
+        padding: 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      td {
+        padding: 14px 12px;
+        border-bottom: 1px solid var(--line);
+        font-variant-numeric: tabular-nums;
+      }
+      .number {
+        text-align: right;
+      }
+      .money {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .link {
+        border: 0;
+        padding: 0;
+        color: var(--accent);
+        text-align: left;
+        background: none;
+      }
+      .small {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .pager {
+        justify-content: flex-end;
+        margin-top: 15px;
+      }
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .stat {
+        padding: 16px;
+        background: var(--bg);
+        border-radius: 8px;
+      }
+      .stat strong {
+        display: block;
+        font-size: 24px;
+        margin-top: 5px;
+      }
+      .error {
+        color: #b94731;
+        white-space: pre-wrap;
+      }
+      .badge {
+        display: inline-block;
+        font-size: 11px;
+        padding: 3px 7px;
+        border-radius: 4px;
+        background: var(--bg);
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #10191e;
+          --panel: #172329;
+          --text: #e4ecef;
+          --muted: #9baeb8;
+          --line: #2b3b45;
+          --accent: #61d2be;
+        }
+      }
+      @media (max-width: 700px) {
+        main {
+          padding: 20px 12px;
+        }
+        header {
+          display: block;
+        }
+        .stats {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        section {
+          padding: 16px;
+        }
+        input[type="password"] {
+          min-width: 0;
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">CLIPROXYAPI · OBSERVABILITY</div>
+          <h1>Account usage</h1>
+          <p>
+            Output token value, attributed to the upstream account that served
+            each request.
+          </p>
+        </div>
+        <span class="badge">USD · API base-price estimates</span>
+      </header>
+      <section>
+        <form id="auth">
+          <label class="grow"
+            >Management key<input
+              id="key"
+              type="password"
+              autocomplete="off"
+              required
+              placeholder="Enter your management key" /></label
+          ><button class="primary">Connect</button>
+        </form>
+        <p class="small">
+          The key stays in this page's memory and is sent only to this server.
+        </p>
+        <p id="error" class="error" role="alert"></p>
+      </section>
+      <div id="connected" hidden>
+        <section>
+          <div class="toolbar">
+            <div class="grow">
+              <h2>Collection status</h2>
+              <p id="status"></p>
+              <p id="price" class="small"></p>
+            </div>
+            <button id="refresh-prices">Refresh prices</button>
+          </div>
+        </section>
+        <section>
+          <form id="filters">
+            <label>From (UTC)<input id="from" type="date" /></label
+            ><label>To (UTC)<input id="to" type="date" /></label
+            ><label
+              >Provider<input
+                id="provider"
+                placeholder="All providers" /></label
+            ><label
+              >Pricing model<input id="model" placeholder="All models" /></label
+            ><label
+              >Sort by<select id="sort">
+                <option value="output_usd">Output value</option>
+                <option value="total_usd">Total value</option>
+                <option value="output_tokens">Output tokens</option>
+                <option value="last_seen">Last activity</option>
+              </select></label
+            ><button class="primary">Apply / refresh</button>
+          </form>
+        </section>
+        <section>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Provider</th>
+                  <th class="number">Executions</th>
+                  <th class="number">Output tokens</th>
+                  <th class="number">Output value</th>
+                  <th class="number">Total value</th>
+                  <th class="number">Unpriced / partial</th>
+                </tr>
+              </thead>
+              <tbody id="accounts"></tbody>
+            </table>
+          </div>
+          <p id="empty" hidden>No recorded accounts in this range.</p>
+          <div class="pager">
+            <span id="page" class="small"></span
+            ><button id="previous">Previous</button
+            ><button id="next">Next</button>
+          </div>
+          <p class="small">
+            Values include only observed usage. Missing usage and unavailable
+            prices are shown as coverage gaps. Retries count as separate
+            upstream executions.
+          </p>
+        </section>
+        <section id="detail" hidden>
+          <div class="toolbar">
+            <h2 id="account-name" class="grow"></h2>
+            <button id="close-detail">Close</button>
+          </div>
+          <div id="stats" class="stats"></div>
+          <h2 style="margin-top: 24px">Daily value by model</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>UTC day</th>
+                  <th>Model</th>
+                  <th class="number">Output tokens</th>
+                  <th class="number">Output USD</th>
+                  <th class="number">Total USD</th>
+                </tr>
+              </thead>
+              <tbody id="daily"></tbody>
+            </table>
+          </div>
+          <h2 style="margin-top: 24px">Recent executions</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Model</th>
+                  <th>Execution</th>
+                  <th>Status</th>
+                  <th class="number">Output tokens</th>
+                  <th class="number">Output USD</th>
+                </tr>
+              </thead>
+              <tbody id="requests"></tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <span id="request-page" class="small"></span
+            ><button id="request-previous">Previous</button
+            ><button id="request-next">Next</button>
+          </div>
+        </section>
+      </div>
+    </main>
+    <script>
+      "use strict";
+      const $ = (id) => document.getElementById(id),
+        base = "/v8/management/observability/usage";
+      let key = "",
+        offset = 0,
+        total = 0,
+        selected = "",
+        requestOffset = 0,
+        requestTotal = 0;
+      const count = (n) => Number(n || 0).toLocaleString(),
+        money = (n) =>
+          "$" +
+          Number(n || 0).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 8,
+          });
+      function cell(row, value, cls = "") {
+        const td = document.createElement("td");
+        td.textContent = value;
+        td.className = cls;
+        row.append(td);
+        return td;
+      }
+      function message(err) {
+        $("error").textContent = err ? String(err.message || err) : "";
+      }
+      async function api(path, method = "GET") {
+        const response = await fetch(base + path, {
+          method,
+          headers: { Authorization: "Bearer " + key },
+          cache: "no-store",
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Request failed");
+        return data;
+      }
+      function params(start = offset) {
+        const q = new URLSearchParams({
+          offset: String(start),
+          limit: "50",
+          sort: $("sort").value,
+        });
+        for (const name of ["from", "to", "provider", "model"])
+          if ($(name).value) q.set(name, $(name).value);
+        return q;
+      }
+      async function status() {
+        const s = await api("/status");
+        $("status").textContent =
+          (s.enabled ? "Collecting" : "Collection disabled") +
+          (s.started_at && !s.started_at.startsWith("0001")
+            ? " · Started " + new Date(s.started_at).toLocaleString()
+            : "") +
+          " · " +
+          count(s.pending_events) +
+          " events pending";
+        $("price").textContent =
+          (s.price_version
+            ? "Price snapshot " + s.price_version.slice(0, 12)
+            : "No ledger opened") +
+          (s.price_error ? " · " + s.price_error : "") +
+          (s.last_error ? " · " + s.last_error : "");
+        return s;
+      }
+      async function load() {
+        message();
+        const s = await status();
+        if (!s.available) {
+          $("accounts").replaceChildren();
+          $("empty").hidden = false;
+          $("empty").textContent =
+            "Enable observability.usage.accounting.enabled in server configuration to begin recording.";
+          return;
+        }
+        const data = await api("/accounts?" + params());
+        total = data.total;
+        $("accounts").replaceChildren();
+        for (const a of data.items) {
+          const row = document.createElement("tr"),
+            td = cell(row, "");
+          const button = document.createElement("button");
+          button.className = "link";
+          button.textContent = a.label;
+          button.onclick = () => show(a.account_uid).catch(message);
+          td.append(button);
+          cell(row, a.provider);
+          cell(row, count(a.totals.executions), "number");
+          cell(row, count(a.totals.output_tokens), "number");
+          cell(row, money(a.totals.output_usd), "number money");
+          cell(row, money(a.totals.total_usd), "number");
+          cell(
+            row,
+            count(a.totals.unpriced_events) +
+              " / " +
+              count(a.totals.partial_events),
+            "number",
+          );
+          $("accounts").append(row);
+        }
+        $("empty").hidden = data.items.length > 0;
+        $("page").textContent = total
+          ? `${offset + 1}–${Math.min(offset + 50, total)} of ${total}`
+          : "0 accounts";
+        $("previous").disabled = offset === 0;
+        $("next").disabled = offset + 50 >= total;
+      }
+      async function show(id) {
+        selected = id;
+        requestOffset = 0;
+        const data = await api(
+          "/accounts/" + encodeURIComponent(id) + "?" + params(0),
+        );
+        $("account-name").textContent = data.account.label;
+        $("stats").replaceChildren();
+        for (const [label, value] of [
+          ["Output value", money(data.account.totals.output_usd)],
+          ["Total value", money(data.account.totals.total_usd)],
+          ["Output tokens", count(data.account.totals.output_tokens)],
+          ["Missing usage", count(data.account.totals.missing_usage_events)],
+        ]) {
+          const div = document.createElement("div");
+          div.className = "stat";
+          const caption = document.createElement("span");
+          caption.textContent = label;
+          const strong = document.createElement("strong");
+          strong.textContent = value;
+          div.append(caption, strong);
+          $("stats").append(div);
+        }
+        $("daily").replaceChildren();
+        for (const d of data.daily) {
+          const row = document.createElement("tr");
+          cell(row, d.day);
+          cell(row, d.model);
+          cell(row, count(d.totals.output_tokens), "number");
+          cell(row, money(d.totals.output_usd), "number money");
+          cell(row, money(d.totals.total_usd), "number");
+          $("daily").append(row);
+        }
+        $("detail").hidden = false;
+        await requests();
+        $("detail").scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      async function requests() {
+        const data = await api(
+          "/accounts/" +
+            encodeURIComponent(selected) +
+            "/requests?" +
+            params(requestOffset),
+        );
+        requestTotal = data.total;
+        $("requests").replaceChildren();
+        for (const e of data.items) {
+          const row = document.createElement("tr");
+          cell(row, new Date(e.requested_at).toLocaleString());
+          cell(row, e.pricing_model);
+          cell(
+            row,
+            e.execution_id.slice(0, 12) +
+              (e.parent_execution_id ? " · additional model" : ""),
+          );
+          cell(
+            row,
+            e.valuation.status +
+              (e.valuation.reason ? " · " + e.valuation.reason : ""),
+          );
+          cell(row, count(e.token_breakdown.output.total_tokens), "number");
+          cell(row, money(e.valuation.output_usd), "number money");
+          $("requests").append(row);
+        }
+        $("request-page").textContent = count(data.total) + " retained events";
+        $("request-previous").disabled = requestOffset === 0;
+        $("request-next").disabled = requestOffset + 50 >= requestTotal;
+      }
+      $("auth").onsubmit = async (e) => {
+        e.preventDefault();
+        key = $("key").value;
+        try {
+          await status();
+          $("connected").hidden = false;
+          offset = 0;
+          await load();
+        } catch (err) {
+          $("connected").hidden = true;
+          message(err);
+        }
+      };
+      $("filters").onsubmit = (e) => {
+        e.preventDefault();
+        offset = 0;
+        $("detail").hidden = true;
+        load().catch(message);
+      };
+      $("previous").onclick = () => {
+        offset = Math.max(0, offset - 50);
+        load().catch(message);
+      };
+      $("next").onclick = () => {
+        offset += 50;
+        load().catch(message);
+      };
+      $("request-previous").onclick = () => {
+        requestOffset = Math.max(0, requestOffset - 50);
+        requests().catch(message);
+      };
+      $("request-next").onclick = () => {
+        requestOffset += 50;
+        requests().catch(message);
+      };
+      $("close-detail").onclick = () => {
+        $("detail").hidden = true;
+      };
+      $("refresh-prices").onclick = async () => {
+        const button = $("refresh-prices");
+        button.disabled = true;
+        message();
+        try {
+          await api("/pricing/refresh", "POST");
+          await status();
+        } catch (err) {
+          message(err);
+        } finally {
+          button.disabled = false;
+        }
+      };
+    </script>
+  </body>
+</html>

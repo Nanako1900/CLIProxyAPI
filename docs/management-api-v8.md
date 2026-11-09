@@ -141,6 +141,11 @@ retain the corresponding business operation's fields.
 | `/observability/logs/requests/<id>` | GET | Get a request log. |
 | `/observability/usage/api-keys` | GET | Get API-key usage. |
 | `/observability/usage/queue` | GET | Get queued usage events. |
+| `/observability/usage/status` | GET | Get durable account-usage collection and price health. |
+| `/observability/usage/accounts` | GET | List upstream accounts and estimated token values. |
+| `/observability/usage/accounts/:id` | GET | Get an account's totals and daily/model breakdowns. |
+| `/observability/usage/accounts/:id/requests` | GET | List retained execution details for an account. |
+| `/observability/usage/pricing/refresh` | POST | Refresh account-usage price snapshots. |
 | `/credentials` | GET, POST, DELETE | List, upload, or delete credential files. |
 | `/credentials/models` | GET | Get credential models. |
 | `/credentials/download` | GET | Download a credential file. |
@@ -160,6 +165,12 @@ retain the corresponding business operation's fields.
 | `/plugins/store` | GET | List the plugin store (supports optional `?refresh=true` to bypass cached release checks). |
 | `/plugins/store/<id>/install` | POST | Install or update a plugin. |
 | `/plugins/<id>/quota` | GET, POST, DELETE | Read, fetch, or reset plugin quota. |
+
+The optional standalone [account token-value ledger](usage-accounting.md) is
+configured under `observability.usage.accounting`. Its embedded dashboard is
+available at `/usage.html`; all account data requests require management
+authentication. Values are USD API base-price estimates and include explicit
+coverage counts for unpriced or partial usage.
 
 ## OAuth
 

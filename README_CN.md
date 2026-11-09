@@ -147,7 +147,7 @@ CLIProxyAPI 用户手册： [https://help.router-for.me/](https://help.router-fo
 
 ## 使用量统计
 
-自v6.10.0版本以后，CLIProxyAPI及 [CPAMC](https://github.com/router-for-me/Cli-Proxy-API-Management-Center) 项目不再预置数据统计功能，如果有数据统计需求的请使用以下项目：
+本分支提供可选的[账户 Token 价值统计](docs/usage-accounting.md)：持久记录请求所属的上游账户，累计输出 Token 的美元估值，并内置 `/usage.html` 统计页。单机模式下启用 `observability.usage.accounting.enabled` 即可使用。更多分析和管理功能可参考以下项目：
 
 ### [CPA Usage Keeper](https://github.com/Willxup/cpa-usage-keeper)
 

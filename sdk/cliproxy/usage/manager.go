@@ -46,6 +46,14 @@ type Record struct {
 	ParentSessionID string
 	AuthID          string
 	AuthIndex       string
+	// AccountKey is an opaque upstream identity, independent of rotating tokens.
+	AccountKey   string
+	AccountLabel string
+	// ParentExecutionID links additional-model usage to its upstream attempt.
+	ParentExecutionID string
+	UpstreamModel     string
+	// PricingParams contains only allowlisted final request parameters.
+	PricingParams map[string]bool
 	// AccessTokenSHA256 identifies the OAuth token version without exposing the token.
 	AccessTokenSHA256 string
 	AuthType          string
@@ -100,6 +108,8 @@ type Failure struct {
 
 // Detail holds the token and structured usage breakdown captured from an upstream response.
 type Detail struct {
+	// Reported distinguishes explicit zero usage from a missing usage object.
+	Reported            bool
 	InputTokens         int64
 	OutputTokens        int64
 	ReasoningTokens     int64
@@ -717,8 +727,8 @@ func (m *Manager) RegisterNamed(name string, plugin Plugin) {
 	m.pluginsMu.Unlock()
 }
 
-// Publish enqueues a usage record for processing. If no plugin is registered
-// the record will be discarded downstream.
+// Publish commits to the request-scoped recorder before enqueuing a record for
+// asynchronous plugins. Records without a plugin are discarded downstream.
 func (m *Manager) Publish(ctx context.Context, record Record) {
 	if m == nil {
 		return
@@ -760,6 +770,11 @@ func (m *Manager) Publish(ctx context.Context, record Record) {
 		}
 	}
 	ctx = WithCapturedIdentity(ctx, record.APIKey, record.AccessProvider, record.IsNativeKey)
+	if recorder := recorderFromContext(ctx); recorder != nil {
+		if errRecord := recorder.Record(context.WithoutCancel(ctx), record); errRecord != nil {
+			log.WithField("execution_id", record.RequestID).WithError(errRecord).Error("usage accounting commit failed")
+		}
+	}
 	// ensure worker is running even if Start was not called explicitly
 	m.Start(context.Background())
 	m.mu.Lock()

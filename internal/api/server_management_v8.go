@@ -11,6 +11,7 @@ import (
 // Configuration paths mirror the v8 YAML tree; operational routes use its groups.
 func (s *Server) registerManagementV8Routes() {
 	const prefix = "/v8/management"
+	s.engine.GET("/usage.html", s.managementAvailabilityMiddleware(), s.mgmt.UsageDashboard)
 	s.engine.GET(prefix+"/oauth/callback", s.managementAvailabilityMiddleware(), s.mgmt.GetOAuthCallbackV8)
 	s.engine.POST(prefix+"/oauth/callback", s.managementAvailabilityMiddleware(), s.mgmt.PostOAuthCallbackV8)
 
@@ -44,6 +45,11 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/observability/logs/requests/:id", s.mgmt.GetRequestLogByID)
 	v8.GET("/observability/usage/api-keys", s.mgmt.GetAPIKeyUsage)
 	v8.GET("/observability/usage/queue", s.mgmt.GetUsageQueue)
+	v8.GET("/observability/usage/accounts", s.mgmt.GetUsageAccounts)
+	v8.GET("/observability/usage/accounts/:id", s.mgmt.GetUsageAccount)
+	v8.GET("/observability/usage/accounts/:id/requests", s.mgmt.GetUsageAccountRequests)
+	v8.GET("/observability/usage/status", s.mgmt.GetUsageAccountingStatus)
+	v8.POST("/observability/usage/pricing/refresh", s.mgmt.RefreshUsagePrices)
 
 	v8.GET("/credentials", s.mgmt.ListAuthFiles)
 	v8.POST("/credentials", s.mgmt.UploadAuthFileV8)

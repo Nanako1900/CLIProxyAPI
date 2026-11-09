@@ -39,6 +39,9 @@ type UsageReporter struct {
 	alias                string
 	authID               string
 	authIndex            string
+	accountKey           string
+	accountLabel         string
+	pricingParams        map[string]bool
 	authMu               sync.RWMutex
 	accessTokenHash      string
 	authType             string
@@ -152,6 +155,7 @@ func NewUsageReporter(ctx context.Context, provider, model string, auth *cliprox
 		reporter.authID = auth.ID
 		reporter.authIndex = auth.EnsureIndex()
 		reporter.accessTokenHash = authAccessTokenSHA256(auth)
+		reporter.accountKey, reporter.accountLabel = accountingIdentity(auth)
 	}
 	return reporter
 }
@@ -357,6 +361,16 @@ func (r *UsageReporter) SetTranslatedRequestMetadata(payload []byte, format stri
 	}
 	r.reasoning = thinking.ExtractTranslatedReasoningEffort(payload, format)
 	r.effectiveServiceTier = extractEffectiveServiceTier(payload)
+	r.pricingParams = nil
+	if node := ojson.GetBytesNoCopy(payload, "enable_thinking"); node.Type == ojson.True || node.Type == ojson.False {
+		r.pricingParams = map[string]bool{"enable_thinking": node.Bool()}
+	}
+	for _, path := range []string{"model", "request.model", "interaction.model"} {
+		if model := ojson.GetBytesNoCopy(payload, path); model.Type == ojson.String && model.String() != "" {
+			r.SetUpstreamModel(model.String())
+			break
+		}
+	}
 }
 
 // SetTranslatedReasoningEffort is retained for existing executor call sites.
@@ -542,6 +556,8 @@ func (r *UsageReporter) buildAdditionalModelRecord(model string, detail usage.De
 	}
 	rec := r.buildRecordForModel(model, detail, false, usage.Failure{})
 	rec.RequestID = uuid.NewString()
+	rec.ParentExecutionID = r.requestID
+	rec.UpstreamModel = model
 	return rec, true
 }
 
@@ -693,6 +709,10 @@ func (r *UsageReporter) buildRecordForModel(model string, detail usage.Detail, f
 		ParentSessionID:      r.parentSessionID,
 		AuthID:               r.authID,
 		AuthIndex:            r.authIndex,
+		AccountKey:           r.accountKey,
+		AccountLabel:         r.accountLabel,
+		UpstreamModel:        r.UpstreamModel(),
+		PricingParams:        r.pricingParams,
 		AccessTokenSHA256:    r.accessTokenFingerprint(),
 		AuthType:             r.authType,
 		ReasoningEffort:      r.reasoning,
@@ -1153,7 +1173,7 @@ func (b *StreamUsageBuffer) observeGeminiFamilyStream(line []byte, allowResponse
 		return
 	}
 	detail := parseGeminiFamilyUsageDetail(node)
-	if !allowResponseWrapper && !hasNonZeroTokenUsage(detail) {
+	if !allowResponseWrapper && !hasNonZeroTokenUsage(detail) && !(detail.Reported && hasGeminiTerminalCandidate(candidatesNode)) {
 		return
 	}
 	if b.ok {
@@ -1816,6 +1836,7 @@ func parseOpenAIStyleUsageNode(usageNode ojson.Result) usage.Detail {
 		compDetails     ojson.Result
 		flatReasoning   ojson.Result
 	)
+	detail.Reported = hasNumericUsageField(usageNode, "prompt_tokens", "input_tokens", "completion_tokens", "output_tokens", "total_tokens")
 	usageNode.ForEach(func(key, val ojson.Result) bool {
 		switch key.String() {
 		case "prompt_tokens":
@@ -2745,6 +2766,7 @@ func parseClaudeUsageNode(usageNode ojson.Result) usage.Detail {
 		nonReasoningOutput = 0
 	}
 	detail := usage.Detail{
+		Reported:            hasNumericUsageField(usageNode, "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"),
 		InputTokens:         usageNode.Get("input_tokens").Int(),
 		OutputTokens:        rawOutputTokens,
 		ReasoningTokens:     reasoningTokens,
@@ -3236,6 +3258,7 @@ func parseGeminiFamilyUsageDetail(node ojson.Result) usage.Detail {
 	})
 	inputTokens, okInput := safeUsageTokenSum(promptTokens, toolUseTokens)
 	detail := usage.Detail{
+		Reported:        hasNumericUsageField(node, "promptTokenCount", "prompt_token_count", "candidatesTokenCount", "candidates_token_count", "thoughtsTokenCount", "thoughts_token_count", "totalTokenCount", "total_token_count", "cachedContentTokenCount", "cached_content_token_count", "toolUsePromptTokenCount", "tool_use_prompt_token_count"),
 		InputTokens:     inputTokens,
 		OutputTokens:    candidatesTokens,
 		ReasoningTokens: thoughtsTokens,
@@ -3631,6 +3654,7 @@ func parseInteractionsUsageDetail(node ojson.Result) usage.Detail {
 		toolUseTokens,
 	)
 	detail := usage.Detail{
+		Reported:            hasNumericUsageField(node, "input_tokens", "prompt_tokens", "total_input_tokens", "output_tokens", "completion_tokens", "total_output_tokens", "total_tokens", "totalTokenCount", "reasoning_tokens", "thoughtsTokenCount", "total_thought_tokens"),
 		InputTokens:         inputTokens,
 		OutputTokens:        firstExistingUsageNode(node, "output_tokens", "completion_tokens", "total_output_tokens").Int(),
 		ReasoningTokens:     firstExistingUsageNode(node, "reasoning_tokens", "thoughtsTokenCount", "total_thought_tokens").Int(),
@@ -3747,7 +3771,16 @@ func parseInteractionsUsageDetail(node ojson.Result) usage.Detail {
 }
 
 func hasUsageDetail(detail usage.Detail) bool {
-	return hasNonZeroTokenUsage(detail)
+	return detail.Reported || hasNonZeroTokenUsage(detail)
+}
+
+func hasNumericUsageField(node ojson.Result, paths ...string) bool {
+	for _, path := range paths {
+		if node.Get(path).Type == ojson.Number {
+			return true
+		}
+	}
+	return false
 }
 
 func ParseInteractionsUsage(data []byte) usage.Detail {
@@ -3867,13 +3900,22 @@ func ParseGeminiStreamUsage(line []byte) (usage.Detail, bool) {
 		return usage.Detail{}, false
 	}
 	detail := parseGeminiFamilyUsageDetail(node)
-	if !hasNonZeroTokenUsage(detail) {
+	if !hasNonZeroTokenUsage(detail) && !(detail.Reported && hasGeminiTerminalCandidate(root.Get("candidates"))) {
 		return usage.Detail{}, false
 	}
 	if hasGeminiCandidateArtifactMarker(payload) {
 		applyGeminiPayloadArtifacts(&detail, root)
 	}
 	return detail, true
+}
+
+func hasGeminiTerminalCandidate(candidates ojson.Result) bool {
+	for _, candidate := range candidates.Array() {
+		if candidate.Get("finishReason").String() != "" || candidate.Get("finish_reason").String() != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func firstExistingUsageNode(root ojson.Result, paths ...string) ojson.Result {
