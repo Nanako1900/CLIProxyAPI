@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/accounting"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/buildinfo"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/clientua"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
@@ -66,6 +67,7 @@ type Handler struct {
 	siwcCommitMu            sync.Mutex
 	pluginLoginSaveMu       sync.Mutex
 	clientUserAgents        *clientua.Store
+	usageAccounting         *accounting.Runtime
 }
 
 type configReloadSnapshot struct {

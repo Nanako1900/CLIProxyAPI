@@ -32,6 +32,7 @@ auths/*
 docs/*
 !docs/management-api-v8.md
 !docs/user-agent-settings.md
+!docs/usage-accounting.md
 AGENTS.md
 CLAUDE.md
 GEMINI.md

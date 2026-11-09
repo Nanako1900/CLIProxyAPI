@@ -1266,6 +1266,26 @@ observability:
     # Default: 60. Max: 3600.
     redis-usage-queue-retention-seconds: 60
 
+    # Durable upstream-account token values, independent of the in-memory queue.
+    # See docs/usage-accounting.md. Standalone mode only; Home owns its accounting.
+    accounting:
+      enabled: false
+      # Defaults to usage.db under auth-dir. Use a persistent volume in containers.
+      path: ""
+      # Request details expire; lifetime totals, daily totals, and deduplication remain.
+      detail-retention-days: 30
+      # Optional stable identities, keyed by credential auth_index or auth ID.
+      # account-bindings:
+      #   "old-credential-auth-index": "my-account"
+      #   "replacement-credential-auth-index": "my-account"
+      # Optional exact model-name mapping to the pricing catalog.
+      # model-aliases:
+      #   "custom-model-name": "gpt-4o"
+      pricing:
+        # An embedded catalog is available offline; failed refreshes retain old prices.
+        source-url: "https://basellm.github.io/llm-metadata/api/newapi/ratio_config-v1-base.json"
+        refresh-interval: "24h"
+
   # Enable pprof HTTP debug server (host:port). Keep it bound to localhost for safety.
   pprof:
     enable: false

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/accounting"
 	managementHandlers "github.com/router-for-me/CLIProxyAPI/v8/internal/api/handlers/management"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/api/middleware"
 	codexlive "github.com/router-for-me/CLIProxyAPI/v8/internal/client/codex/live"
@@ -32,6 +33,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers/openai"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/http2"
 	"gopkg.in/yaml.v3"
@@ -87,6 +89,7 @@ type Server struct {
 	// management handler
 	mgmt             *managementHandlers.Handler
 	clientUserAgents *clientua.Store
+	usageAccounting  *accounting.Runtime
 
 	// pluginHost owns dynamic plugin Management API route dispatch.
 	pluginHost *pluginhost.Host
@@ -224,6 +227,12 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	applyClaudeToolSearchConfig(cfg)
 	// Initialize management handler
 	s.mgmt = managementHandlers.NewHandler(cfg, configFilePath, authManager)
+	s.usageAccounting = accounting.NewRuntime(cfg)
+	s.mgmt.SetUsageAccounting(s.usageAccounting)
+	engine.Use(func(c *gin.Context) {
+		c.Request = c.Request.WithContext(usage.WithRecorder(c.Request.Context(), s.usageAccounting))
+		c.Next()
+	})
 	s.initClientUserAgents(cfg)
 	s.mgmt.SetPluginHost(optionState.pluginHost)
 	s.mgmt.SetConfigReloadHook(optionState.configReloadHook)
@@ -460,6 +469,14 @@ func (s *Server) Stop(ctx context.Context) error {
 	}
 	if errCatalog := s.clientUserAgents.Close(); errCatalog != nil {
 		log.WithError(errCatalog).Warn("flush client UA catalog at shutdown")
+	}
+	if s.usageAccounting != nil {
+		if errClose := s.usageAccounting.Close(); errClose != nil {
+			log.WithError(errClose).Error("close usage accounting")
+			if errCloseServer == nil {
+				errCloseServer = errClose
+			}
+		}
 	}
 	if errCloseServer != nil {
 		return fmt.Errorf("failed to shutdown HTTP server: %v", errCloseServer)

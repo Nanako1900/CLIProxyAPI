@@ -266,6 +266,7 @@ func mergeStreamStructuredFields(merged *usage.Detail, existing, update usage.De
 	if merged == nil {
 		return
 	}
+	merged.Reported = existing.Reported || update.Reported
 	if merged.UpstreamServiceTier == "" {
 		merged.UpstreamServiceTier = existing.UpstreamServiceTier
 	}
