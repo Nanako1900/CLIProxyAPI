@@ -185,6 +185,7 @@ func (m *Manager) setConfigSnapshotLocked(cfg *internalconfig.Config) bool {
 		m.clearHomeRuntimeAuths()
 	}
 	m.rebuildAPIKeyModelAliasFromRuntimeConfig()
+	m.applyQuotaShadowConfig(cfg)
 	return clearedCooldowns
 }
 
@@ -1389,6 +1390,9 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			}
 		}
 		m.scheduler.upsertAuthResult(authSnapshot, targetModels, credentialScopedResult)
+	}
+	if authSnapshot != nil {
+		m.observeQuotaShadowResult(result, authSnapshot, now)
 	}
 	if authSnapshot != nil && cooldownStateChanged {
 		m.persistCooldownStates(context.Background())

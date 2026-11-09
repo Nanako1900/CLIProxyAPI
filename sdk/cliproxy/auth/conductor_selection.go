@@ -2490,6 +2490,16 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 }
 
 func (m *Manager) pickNextMixed(ctx context.Context, providers []string, model string, opts cliproxyexecutor.Options, tried map[string]struct{}) (*Auth, ProviderExecutor, string, error) {
+	if m.quotaShadow.Load() == nil {
+		return m.pickNextMixedSelect(ctx, providers, model, opts, tried)
+	}
+	opts.EnsureMetadata()
+	auth, executor, provider, errPick := m.pickNextMixedSelect(ctx, providers, model, opts, tried)
+	m.observeQuotaShadowSelection(ctx, providers, model, opts, tried, auth, provider, errPick)
+	return auth, executor, provider, errPick
+}
+
+func (m *Manager) pickNextMixedSelect(ctx context.Context, providers []string, model string, opts cliproxyexecutor.Options, tried map[string]struct{}) (*Auth, ProviderExecutor, string, error) {
 	opts.EnsureMetadata()
 	clearSchedulerSelectionID(opts.Metadata)
 	if m.HomeEnabled() {

@@ -329,6 +329,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		}
 		if s.coreManager != nil {
 			s.coreManager.StopAutoRefresh()
+			s.coreManager.StopQuotaShadow()
 		}
 		if watcher := s.currentWatcher(); watcher != nil {
 			if err := watcher.Stop(); err != nil {
