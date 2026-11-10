@@ -566,6 +566,26 @@ type RoutingConfig struct {
 	//     keep the binding and return the error (or retry the same credential) instead.
 	// Ignored when SessionAffinity is false.
 	SessionAffinityRebindOn string `yaml:"session-affinity-rebind-on,omitempty" json:"session-affinity-rebind-on,omitempty"`
+
+	// QuotaShadow records what a quota-aware scheduler would select next to every
+	// actual selection, without changing routing.
+	QuotaShadow QuotaShadowConfig `yaml:"quota-shadow,omitempty" json:"quota-shadow,omitempty"`
+}
+
+// QuotaShadowConfig configures passive quota-aware scheduling evaluation.
+type QuotaShadowConfig struct {
+	// Enabled turns on shadow evaluation and JSONL recording.
+	Enabled bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+
+	// File is the JSONL output path. Empty uses quota-shadow.jsonl in the log directory.
+	File string `yaml:"file,omitempty" json:"file,omitempty"`
+
+	// MaxFileMB rotates the output to "<file>.1" once it grows past this size. Default: 256.
+	MaxFileMB int `yaml:"max-file-mb,omitempty" json:"max-file-mb,omitempty"`
+
+	// SoftLimitPercent is the window usage percentage at which the shadow scheduler
+	// stops preferring a credential for new selections. Default: 90.
+	SoftLimitPercent float64 `yaml:"soft-limit-percent,omitempty" json:"soft-limit-percent,omitempty"`
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.

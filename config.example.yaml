@@ -203,6 +203,16 @@ routing:
   # Ignored when routing.session-affinity is false.
   session-affinity-rebind-on: "any"
 
+  # Quota-aware shadow evaluation. When enabled, every credential selection also records what a
+  # quota-aware scheduler would have picked, plus the Claude/Codex/Devin usage windows it saw, to a
+  # JSONL file for offline analysis. Routing is never changed. Request results are recorded too,
+  # so window reset behavior and outages can be measured. Home mode selections are not recorded.
+  # quota-shadow:
+  #   enabled: false
+  #   file: ""                 # default: <log directory>/quota-shadow.jsonl
+  #   max-file-mb: 256         # rotate to <file>.1 past this size
+  #   soft-limit-percent: 90   # usage at which the shadow scheduler avoids a credential
+
   # When true, unprefixed model requests only use credentials without a prefix (except when prefix == model name).
   force-model-prefix: false
 

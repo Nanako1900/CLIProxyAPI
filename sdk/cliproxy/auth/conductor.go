@@ -247,6 +247,15 @@ type Manager struct {
 	// authLoadGate allows concurrent credential transactions, but excludes whole-store reloads.
 	// Mutations acquire one permit; Load acquires all permits before reading the store.
 	authLoadGate *semaphore.Weighted
+
+	// quotaShadow records quota-aware shadow selections when routing.quota-shadow is enabled.
+	quotaShadow atomic.Pointer[quotaShadowRecorder]
+	// quotaShadowMu serializes recorder replacement with StopQuotaShadow.
+	quotaShadowMu sync.Mutex
+	// quotaShadowStopped prevents a late config reload from restarting a stopped recorder.
+	quotaShadowStopped bool
+	// quotaShadowClosing tracks replaced recorders that are still draining.
+	quotaShadowClosing sync.WaitGroup
 }
 
 // NewManager constructs a manager with optional custom selector and hook.
