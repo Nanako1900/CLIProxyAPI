@@ -49,6 +49,37 @@ func TestConfiguredUserAgentPrecedenceAndScope(t *testing.T) {
 	}
 }
 
+func TestConfiguredClaudeUserAgentKeepsClientRequestFields(t *testing.T) {
+	for _, tc := range []struct{ name, configured, current, want string }{
+		{"request field", "claude-cli/2.1.353 (external, cli)", "claude-cli/2.1.300 (external, cli, workload/cron)", "claude-cli/2.1.353 (external, cli, workload/cron)"},
+		{"client order kept", "claude-cli/2.1.353 (external, cli)", "claude-cli/2.1.353 (external, cli, future-feature/value, agent-sdk/0.2.133)", "claude-cli/2.1.353 (external, cli, future-feature/value, agent-sdk/0.2.133)"},
+		{"configured field wins", "claude-cli/2.1.353 (external, cli, agent-sdk/0.3.0)", "claude-cli/2.1.353 (external, cli, agent-sdk/0.2.133, Workload/cron)", "claude-cli/2.1.353 (external, cli, agent-sdk/0.3.0, Workload/cron)"},
+		{"configured entrypoint wins", "claude-cli/2.1.353 (external, claude-vscode)", "claude-cli/2.1.353 (external, cli, request-phase/background)", "claude-cli/2.1.353 (external, claude-vscode, request-phase/background)"},
+		{"no client fields", "claude-cli/2.1.353 (external, cli)", "claude-cli/2.1.300 (external, cli)", "claude-cli/2.1.353 (external, cli)"},
+		{"non Claude Code configured", "custom-client/1.0", "claude-cli/2.1.300 (external, cli, workload/cron)", "custom-client/1.0"},
+		{"non Claude Code client", "claude-cli/2.1.353 (external, cli)", "Mozilla/5.0 (X11; Linux)", "claude-cli/2.1.353 (external, cli)"},
+		{"invalid client field", "claude-cli/2.1.353 (external, cli)", "claude-cli/2.1.300 (external, cli, workload)", "claude-cli/2.1.353 (external, cli)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := carryClaudeRequestFields(tc.configured, tc.current); got != tc.want {
+				t.Fatalf("UA = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	cfg := &config.Config{ClaudeHeaderDefaults: config.ClaudeHeaderDefaults{UserAgent: "claude-cli/2.1.353 (external, cli)"}}
+	for _, provider := range []string{"claude", "codex"} {
+		headers := http.Header{"User-Agent": {"claude-cli/2.1.300 (external, cli, workload/cron)"}}
+		ApplyConfiguredUserAgent(context.Background(), headers, cfg, &cliproxyauth.Auth{}, provider, nil)
+		want := "claude-cli/2.1.353 (external, cli, workload/cron)"
+		if provider == "codex" {
+			want = "claude-cli/2.1.300 (external, cli, workload/cron)"
+		}
+		if got := headers.Get("User-Agent"); got != want {
+			t.Fatalf("%s UA = %q, want %q", provider, got, want)
+		}
+	}
+}
+
 func TestAutomaticUserAgentPreservesIdentityAndNeverDowngrades(t *testing.T) {
 	for _, tc := range []struct{ provider, baseline, version, want string }{
 		{"codex", "codex-tui/0.154.0 (Linux; aarch64) terminal/2 (codex-tui; 0.154.0)", "0.167.0", "codex-tui/0.167.0 (Linux; aarch64) terminal/2 (codex-tui; 0.167.0)"},

@@ -121,6 +121,55 @@ func ResolveConfiguredUserAgent(provider, value, baseline string) string {
 	return value
 }
 
+// carryClaudeRequestFields keeps the comment fields of the outgoing Claude Code
+// UA (for example workload/cron or agent-sdk/<version>) that the configured
+// identity does not name. A configured identity sets product, version, and
+// entrypoint; per-request fields still come from the client. Values that are
+// not Claude Code UAs are returned unchanged.
+func carryClaudeRequestFields(configured, current string) string {
+	if _, ok := parseClaudeCodeUserAgent(configured); !ok {
+		return configured
+	}
+	if _, ok := parseClaudeCodeUserAgent(current); !ok {
+		return configured
+	}
+	prefix, configuredComment, _ := strings.Cut(strings.TrimSpace(configured), "(")
+	_, currentComment, _ := strings.Cut(strings.TrimSpace(current), "(")
+	fields := claudeUserAgentCommentFields(configuredComment)
+	named := make(map[string]struct{}, len(fields))
+	for _, field := range fields[2:] {
+		name, _, _ := strings.Cut(field, "/")
+		named[strings.ToLower(name)] = struct{}{}
+	}
+	carried := false
+	for _, field := range claudeUserAgentCommentFields(currentComment)[2:] {
+		name, _, _ := strings.Cut(field, "/")
+		if _, exists := named[strings.ToLower(name)]; exists {
+			continue
+		}
+		fields = append(fields, field)
+		carried = true
+	}
+	if !carried {
+		return configured
+	}
+	merged := prefix + "(" + strings.Join(fields, ", ") + ")"
+	if !config.ValidUserAgent(merged) {
+		return configured
+	}
+	return merged
+}
+
+// claudeUserAgentCommentFields splits a parsed Claude Code UA comment, without
+// its opening parenthesis, into trimmed fields.
+func claudeUserAgentCommentFields(comment string) []string {
+	fields := strings.Split(strings.TrimSuffix(comment, ")"), ",")
+	for index, field := range fields {
+		fields[index] = strings.TrimSpace(field)
+	}
+	return fields
+}
+
 // ApplyConfiguredUserAgent is the final UA boundary after native/model headers.
 // Credential overrides take precedence over provider settings. Only UA is changed.
 func ApplyConfiguredUserAgent(ctx context.Context, headers http.Header, cfg *config.Config, auth *cliproxyauth.Auth, provider string, clientHeaders http.Header) {
@@ -155,7 +204,11 @@ func ApplyConfiguredUserAgent(ctx context.Context, headers http.Header, cfg *con
 	if !config.ValidUserAgent(value) || strings.TrimSpace(value) == "" {
 		return
 	}
-	value = ResolveConfiguredUserAgent(provider, value, HeaderValueCaseInsensitive(headers, "User-Agent"))
+	current := HeaderValueCaseInsensitive(headers, "User-Agent")
+	value = ResolveConfiguredUserAgent(provider, value, current)
+	if provider == "claude" {
+		value = carryClaudeRequestFields(value, current)
+	}
 	for name := range headers {
 		if strings.EqualFold(name, "User-Agent") {
 			delete(headers, name)
