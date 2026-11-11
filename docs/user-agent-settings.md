@@ -8,7 +8,7 @@ their handshake until reconnected.
 
 | Value | Behavior |
 | --- | --- |
-| Full User-Agent string | Use that exact identity after native, cloaking, and model header rules. Leading/trailing spaces are trimmed. |
+| Full User-Agent string | Use that exact identity after native, cloaking, and model header rules. Leading/trailing spaces are trimmed. For a Claude Code UA, comment fields the client sends that the setting does not name, such as `workload/cron`, `request-phase/background`, or `agent-sdk/<version>`, are appended after the configured identity. |
 | `auto` | Update the client version from the official npm package's stable `latest` release. |
 | Empty | Keep CPA's existing native identity behavior. |
 
