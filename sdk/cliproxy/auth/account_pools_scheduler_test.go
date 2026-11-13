@@ -41,3 +41,49 @@ func TestAccountPoolsPluginHostAvailability(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountPoolsInactiveSchedulerAndActivation(t *testing.T) {
+	m, e := newPoolTestManager(t)
+	inactive := &inactivePluginScheduler{}
+	m.SetPluginScheduler(inactive)
+	ctx := poolTestContext("basic")
+	req := executor.Request{Model: "pool-test-model"}
+	if _, err := m.SelectAuth(ctx, e.Identifier(), req.Model, executor.Options{}); err != nil {
+		t.Fatalf("single-provider selection: %v", err)
+	}
+	if _, err := m.Execute(ctx, []string{e.Identifier()}, req, executor.Options{}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if _, err := m.ExecuteCount(ctx, []string{e.Identifier()}, req, executor.Options{}); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	stream, err := m.ExecuteStream(ctx, []string{e.Identifier()}, req, executor.Options{})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	for range stream.Chunks {
+	}
+	if inactive.calls != 0 || len(e.calls) != 3 {
+		t.Fatalf("inactive scheduler calls=%d executor calls=%v", inactive.calls, e.calls)
+	}
+	for _, id := range e.calls {
+		if id != "pool-a1" && id != "pool-a2" {
+			t.Fatalf("foreign account used: %s", id)
+		}
+	}
+	active := &fakePluginScheduler{}
+	m.SetPluginScheduler(active)
+	if _, err := m.SelectAuth(ctx, e.Identifier(), req.Model, executor.Options{}); err == nil || err.Error() != "pool_adapter_unsupported" {
+		t.Fatalf("active scheduler single-provider gate: %v", err)
+	}
+	if _, err := m.Execute(ctx, []string{e.Identifier()}, req, executor.Options{}); err == nil || err.Error() != "pool_adapter_unsupported" {
+		t.Fatalf("active scheduler mixed gate: %v", err)
+	}
+	if active.calls != 0 || len(e.calls) != 3 {
+		t.Fatal("unsupported scheduler reached selection or execution")
+	}
+	m.SetPluginScheduler(inactive)
+	if _, err := m.Execute(ctx, []string{e.Identifier()}, req, executor.Options{}); err != nil {
+		t.Fatalf("deactivated scheduler did not restore routing: %v", err)
+	}
+}

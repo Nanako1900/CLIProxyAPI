@@ -1,0 +1,119 @@
+--- a/src/i18n/locales/en.json
++++ b/src/i18n/locales/en.json
+@@ -2509,6 +2509,14 @@
+     "delete_error": "Could not delete the sample."
+   },
+   "account_pools": {
++    "runtime_title": "Runtime status",
++    "runtime_active": "Pool isolation is active. Inference still requires an enabled pool, assigned eligible accounts and a supported adapter.",
++    "runtime_disabled": "Pool isolation is disabled. Changes to the isolation switch require a CPA restart.",
++    "runtime_restart_required": "Restart required: saved isolation differs from startup. Inference returns 503 pool_restart_required until the CPA process/container restarts. Reloading configuration is insufficient. In Coolify, open the CPA service and select Restart.",
++    "runtime_home_unsupported": "Home mode does not support account pools. Pooled inference remains unavailable.",
++    "runtime_unknown": "Runtime status could not be confirmed. Refresh or deploy the matching backend; saved settings alone do not prove that isolation is active.",
++    "runtime_loading": "Checking the running CPA process…",
++    "runtime_pending": "Saved settings have not reached the running process yet. Wait for configuration reload, then refresh this page.",
+     "title": "Account pools",
+     "description": "Separate account tiers by URL prefix. Requests stay within their selected pool.",
+     "scope_hint": "Local HTTP inference only. Home, plugins, downstream WebSocket and server-side continuation are currently unsupported. Use full conversation history.",
+--- a/src/i18n/locales/zh-CN.json
++++ b/src/i18n/locales/zh-CN.json
+@@ -2507,6 +2507,14 @@
+     "delete_error": "删除记录失败。"
+   },
+   "account_pools": {
++    "runtime_title": "运行状态",
++    "runtime_active": "号池隔离已生效。调用仍需号池已启用、池内有可用账号，并使用支持的接口。",
++    "runtime_disabled": "号池隔离未启用。改变隔离开关后需要重启 CPA。",
++    "runtime_restart_required": "等待重启：已保存的隔离开关与启动时不同。重启 CPA 进程或容器前，推理接口会返回 503 pool_restart_required；仅重载配置无效。在 Coolify 中打开 CPA 服务，点击 Restart（重启）。",
++    "runtime_home_unsupported": "Home 模式暂不支持号池，号池推理不可用。",
++    "runtime_unknown": "无法确认运行状态。请刷新或部署匹配的后端；配置保存成功不代表隔离已生效。",
++    "runtime_loading": "正在检查 CPA 运行状态…",
++    "runtime_pending": "已保存的配置尚未载入运行进程，请等待配置重载后刷新本页。",
+     "title": "号池管理",
+     "description": "通过独立调用地址区分账号级别，请求仅在选定号池内调度。",
+     "scope_hint": "目前支持本机 HTTP 推理；Home、插件、下游 WebSocket 和服务端续接暂不支持。请求需携带完整对话历史。",
+--- a/src/i18n/locales/zh-TW.json
++++ b/src/i18n/locales/zh-TW.json
+@@ -2535,6 +2535,14 @@
+     "delete_error": "刪除紀錄失敗。"
+   },
+   "account_pools": {
++    "runtime_title": "執行狀態",
++    "runtime_active": "號池隔離已生效。呼叫仍需號池已啟用、池內有可用帳號，並使用支援的介面。",
++    "runtime_disabled": "號池隔離未啟用。變更隔離開關後需要重新啟動 CPA。",
++    "runtime_restart_required": "等待重新啟動：已儲存的隔離開關與啟動時不同。重新啟動 CPA 程序或容器前，推理介面會回傳 503 pool_restart_required；僅重新載入設定無效。在 Coolify 中開啟 CPA 服務，點選 Restart（重新啟動）。",
++    "runtime_home_unsupported": "Home 模式暫不支援號池，號池推理無法使用。",
++    "runtime_unknown": "無法確認執行狀態。請重新整理或部署相符的後端；設定儲存成功不代表隔離已生效。",
++    "runtime_loading": "正在檢查 CPA 執行狀態…",
++    "runtime_pending": "已儲存的設定尚未載入執行程序，請等待設定重新載入後重新整理本頁。",
+     "access": "調用密鑰授權",
+     "add_client": "新增身份",
+     "add_pool": "新增號池",
+--- a/src/i18n/locales/ru.json
++++ b/src/i18n/locales/ru.json
+@@ -2503,6 +2503,14 @@
+     "delete_error": "Не удалось удалить образец."
+   },
+   "account_pools": {
++    "runtime_title": "Состояние процесса",
++    "runtime_active": "Изоляция пулов активна. Для запросов нужны включённый пул, доступные назначенные аккаунты и поддерживаемый адаптер.",
++    "runtime_disabled": "Изоляция пулов отключена. Изменение переключателя требует перезапуска CPA.",
++    "runtime_restart_required": "Требуется перезапуск: сохранённый режим отличается от режима при запуске. До перезапуска процесса или контейнера CPA запросы возвращают 503 pool_restart_required. Перезагрузка конфигурации не помогает. В Coolify откройте сервис CPA и нажмите Restart.",
++    "runtime_home_unsupported": "Режим Home не поддерживает пулы аккаунтов. Запросы через пулы недоступны.",
++    "runtime_unknown": "Не удалось подтвердить состояние. Обновите страницу или установите соответствующий сервер; сохранение настроек не означает активацию изоляции.",
++    "runtime_loading": "Проверка работающего процесса CPA…",
++    "runtime_pending": "Настройки ещё не загружены процессом. Дождитесь перезагрузки конфигурации и обновите страницу.",
+     "title": "Пулы аккаунтов",
+     "description": "Разделяйте уровни аккаунтов префиксами URL. Запросы остаются в выбранном пуле.",
+     "scope_hint": "Поддерживается только локальный HTTP. Home, плагины, входящий WebSocket и серверное продолжение пока недоступны. Передавайте полную историю диалога.",
+--- a/src/i18n/locales/vi.json
++++ b/src/i18n/locales/vi.json
+@@ -2515,6 +2515,14 @@
+     "delete_error": "Không thể xóa mẫu."
+   },
+   "account_pools": {
++    "runtime_title": "Trạng thái hoạt động",
++    "runtime_active": "Cách ly nhóm đã có hiệu lực. Yêu cầu vẫn cần nhóm được bật, tài khoản phù hợp trong nhóm và bộ chuyển đổi được hỗ trợ.",
++    "runtime_disabled": "Cách ly nhóm đang tắt. Thay đổi công tắc yêu cầu khởi động lại CPA.",
++    "runtime_restart_required": "Cần khởi động lại: chế độ đã lưu khác chế độ khi khởi động. Yêu cầu trả về 503 pool_restart_required cho đến khi khởi động lại tiến trình hoặc container CPA. Tải lại cấu hình là chưa đủ. Trong Coolify, mở dịch vụ CPA và chọn Restart.",
++    "runtime_home_unsupported": "Chế độ Home không hỗ trợ nhóm tài khoản. Không thể gửi yêu cầu qua nhóm.",
++    "runtime_unknown": "Không thể xác nhận trạng thái. Hãy làm mới hoặc triển khai máy chủ tương ứng; lưu cấu hình không có nghĩa là cách ly đã hoạt động.",
++    "runtime_loading": "Đang kiểm tra tiến trình CPA…",
++    "runtime_pending": "Tiến trình chưa tải cấu hình đã lưu. Đợi tải lại cấu hình rồi làm mới trang.",
+     "title": "Nhóm tài khoản",
+     "description": "Phân tách cấp tài khoản bằng tiền tố URL. Yêu cầu chỉ dùng nhóm đã chọn.",
+     "scope_hint": "Chỉ hỗ trợ HTTP cục bộ. Chưa hỗ trợ Home, plugin, WebSocket phía khách và tiếp nối phía máy chủ. Hãy gửi đầy đủ lịch sử hội thoại.",
+--- a/src/i18n/locales/ko.json
++++ b/src/i18n/locales/ko.json
+@@ -2509,6 +2509,14 @@
+     "delete_error": "샘플을 삭제할 수 없습니다."
+   },
+   "account_pools": {
++    "runtime_title": "실행 상태",
++    "runtime_active": "계정 풀 격리가 적용되었습니다. 요청에는 활성화된 풀, 풀에 할당된 사용 가능한 계정 및 지원되는 어댑터가 필요합니다.",
++    "runtime_disabled": "계정 풀 격리가 꺼져 있습니다. 격리 설정을 변경하면 CPA를 다시 시작해야 합니다.",
++    "runtime_restart_required": "다시 시작 필요: 저장된 격리 설정이 시작 시 설정과 다릅니다. CPA 프로세스나 컨테이너를 다시 시작할 때까지 요청은 503 pool_restart_required를 반환합니다. 설정 다시 로드만으로는 부족합니다. Coolify에서 CPA 서비스를 열고 Restart를 선택하세요.",
++    "runtime_home_unsupported": "Home 모드는 계정 풀을 지원하지 않습니다. 풀을 통한 요청을 사용할 수 없습니다.",
++    "runtime_unknown": "실행 상태를 확인할 수 없습니다. 새로 고치거나 해당 백엔드를 배포하세요. 설정 저장만으로 격리 적용을 확인할 수 없습니다.",
++    "runtime_loading": "CPA 실행 상태를 확인하는 중…",
++    "runtime_pending": "저장된 설정이 아직 프로세스에 적용되지 않았습니다. 설정이 다시 로드된 후 페이지를 새로 고치세요.",
+     "title": "계정 풀",
+     "description": "URL 접두사로 계정 등급을 구분합니다. 요청은 선택한 풀 안에서만 처리됩니다.",
+     "scope_hint": "로컬 HTTP만 지원합니다. Home, 플러그인, 클라이언트 WebSocket 및 서버 측 대화 이어가기는 아직 지원하지 않습니다. 전체 대화 기록을 보내세요.",
+--- a/src/i18n/locales/tr.json
++++ b/src/i18n/locales/tr.json
+@@ -2509,6 +2509,14 @@
+     "delete_error": "Örnek silinemedi."
+   },
+   "account_pools": {
++    "runtime_title": "Çalışma durumu",
++    "runtime_active": "Havuz yalıtımı etkin. İstekler için etkin bir havuz, havuza atanmış uygun hesaplar ve desteklenen bir bağdaştırıcı gerekir.",
++    "runtime_disabled": "Havuz yalıtımı kapalı. Yalıtım anahtarını değiştirmek CPA yeniden başlatması gerektirir.",
++    "runtime_restart_required": "Yeniden başlatma gerekiyor: kaydedilen yalıtım modu başlangıçtakinden farklı. CPA işlemi veya kapsayıcısı yeniden başlatılana kadar istekler 503 pool_restart_required döndürür. Yapılandırmayı yeniden yüklemek yeterli değildir. Coolify içinde CPA hizmetini açıp Restart seçin.",
++    "runtime_home_unsupported": "Home modu hesap havuzlarını desteklemiyor. Havuz üzerinden istekler kullanılamaz.",
++    "runtime_unknown": "Çalışma durumu doğrulanamadı. Sayfayı yenileyin veya eşleşen sunucuyu dağıtın; ayarların kaydedilmesi yalıtımın etkin olduğunu kanıtlamaz.",
++    "runtime_loading": "Çalışan CPA işlemi kontrol ediliyor…",
++    "runtime_pending": "Kaydedilen ayarlar henüz çalışan işleme yüklenmedi. Yapılandırmanın yeniden yüklenmesini bekleyip sayfayı yenileyin.",
+     "title": "Hesap havuzları",
+     "description": "Hesap düzeylerini URL önekleriyle ayırın. İstekler seçilen havuzda kalır.",
+     "scope_hint": "Yalnızca yerel HTTP desteklenir. Home, eklentiler, istemci WebSocket ve sunucu tarafı devam işlemleri henüz desteklenmez. Tam konuşma geçmişini gönderin.",

@@ -43,6 +43,38 @@ writes require readback before retrying. The page does not automatically retry
 mutations. It displays supported protocols and restart requirements; it does not
 implement batch membership transactions or pool accounting reports.
 
+The **Runtime status** banner reports the running process separately from saved
+settings. A persistent **Restart required** warning means inference is blocked
+until the CPA process/container restarts. In Coolify, open the CPA service and
+select **Restart**. With Docker, use `docker restart <cpa-container>`; with Compose,
+use `docker compose restart <cpa-service>`. Restarting an old image does not install
+code fixes: merge the fix and rebuild/redeploy the image first. Refresh the page
+after restart. The management-only `GET /v8/management/account-pools/status`
+endpoint exposes the startup/configured isolation flags and Home incompatibility
+without credentials, with `Cache-Control: no-store`.
+
+### Diagnosing failed requests
+
+Read the response error code as well as the access-log HTTP status:
+
+| Response | Meaning and next step |
+| --- | --- |
+| `400 pool_required` | Use the pool base URL, for example `/pools/kiro/v1` for an OpenAI client or `/pools/kiro` for an Anthropic client. |
+| `503 pool_restart_required` | Restart CPA after changing the isolation switch. Reloading YAML alone is insufficient. |
+| `503 pool_disabled` | Enable the named pool. |
+| `503 pool_no_eligible_accounts` | Check live membership, model support, account availability, and cooldown; an empty pool cannot borrow another pool's accounts. |
+| `501 pool_adapter_unsupported` | Update to the inactive-plugin-host fix, then check for a real plugin scheduler or unsupported private executor/adapter. |
+| `501 pool_continuation_unsupported` | Send full history instead of server-side continuation handles. |
+
+The service creates a plugin host even without a scheduling plugin. Releases
+before the inactive-host fix could list models successfully but reject actual
+inference with `501 pool_adapter_unsupported`. Regression tests now exercise the
+production builder, streaming/non-streaming Chat Completions and Anthropic
+`/v1/messages?beta=true`, token counts, scheduler activation, and pool isolation.
+The `beta` query parameter does not change route support. A successful model list
+does not prove that execution will succeed. `/api/pricing` is not a CPA inference
+endpoint.
+
 ## Configuration
 
 Merge this example into a v8 configuration. Replace all example secrets.

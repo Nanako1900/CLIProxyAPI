@@ -54,6 +54,7 @@ func (s *Server) registerManagementV8Routes() {
 
 	v8.GET("/credentials/pool", s.mgmt.GetCredentialPool)
 	v8.GET("/account-pools/credentials", s.mgmt.ListPoolCredentials)
+	v8.GET("/account-pools/status", s.accountPoolStatus)
 	v8.PATCH("/credentials/pool", s.mgmt.PatchCredentialPool)
 	v8.GET("/credentials", s.mgmt.ListAuthFiles)
 	v8.POST("/credentials", s.mgmt.UploadAuthFileV8)
