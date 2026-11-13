@@ -68,8 +68,8 @@ cannot be changed through these endpoints.
 
 ### Native User-Agent settings
 
-The management panel exposes both User-Agent defaults under **Configuration →
-Advanced → Default headers**. To enable stable client version tracking without
+The management panel exposes both User-Agent defaults in the dedicated **UA control
+panel**. The old Advanced header section links to it. To enable stable version tracking without
 plugins, send `PATCH /v8/management/config`:
 
 ```json
@@ -88,6 +88,19 @@ non-ASCII bytes, or more than 1024 bytes are rejected before saving. See
 [User-Agent settings](user-agent-settings.md) for refresh behavior and deployment.
 
 ### Client User-Agent catalog
+
+`GET /client-user-agents/status` returns provider-default runtime metadata without
+performing a release lookup: configured mode/UA, built-in and resolved UA, baseline
+headers, Claude billing version, and automatic lookup state (enabled, cached version,
+registry URL, interval in seconds, result, optional last-attempt/last-success UTC
+timestamps). Results are `never`, `checking`, `ok`, `failed`, or `cancelled`.
+
+The response also includes loaded UA `overrides` (provider, auth index, display name,
+source, User-Agent and disabled state), `overrideInventoryAvailable`, `homeMode`,
+`catalogAvailable`, `catalogPersistence` (`disk`, `memory`, or `unavailable`) and
+`catalogLimit`. No tokens, raw credential metadata, file paths or actual request
+captures are included. Requires management authentication and sends
+`Cache-Control: no-store`. Returns 503 when configuration is unavailable.
 
 The following endpoints require the existing management authentication and are
 unavailable in Home mode. They do not change active configuration:

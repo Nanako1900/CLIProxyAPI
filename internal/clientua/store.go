@@ -173,6 +173,9 @@ func (s *Store) List(provider string) []Entry {
 	return s.listLocked(provider)
 }
 
+// Persistent reports the startup storage mode without exposing the auth directory.
+func (s *Store) Persistent() bool { return s != nil && s.path != "" }
+
 func (s *Store) Delete(provider, id string) error {
 	s.mu.Lock()
 	if entry, exists := s.entries[id]; exists && entry.Provider == provider {

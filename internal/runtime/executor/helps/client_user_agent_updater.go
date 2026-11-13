@@ -115,8 +115,15 @@ func refreshClientUserAgents(ctx context.Context, settings clientUserAgentSettin
 			continue
 		}
 		pending.Go(func() {
+			attempt := time.Now()
+			cache.recordLookup(provider, "checking", attempt, attempt)
 			version, errFetch := fetchClientUserAgentVersion(ctx, client, provider)
 			if errFetch != nil {
+				result := "failed"
+				if ctx.Err() != nil {
+					result = "cancelled"
+				}
+				cache.recordLookup(provider, result, attempt, time.Now())
 				if ctx.Err() == nil {
 					log.WithField("provider", provider).WithError(errFetch).Warn("UA version lookup failed; keeping cached identity")
 				}
@@ -125,6 +132,7 @@ func refreshClientUserAgents(ctx context.Context, settings clientUserAgentSettin
 			if cache.advance(provider, version) {
 				log.WithFields(log.Fields{"provider": provider, "version": version}).Info("updated automatic client User-Agent version")
 			}
+			cache.recordLookup(provider, "ok", attempt, time.Now())
 		})
 	}
 	pending.Wait()

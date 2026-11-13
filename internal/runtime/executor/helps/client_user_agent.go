@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
@@ -22,6 +23,13 @@ var codexUserAgentSuffixPattern = regexp.MustCompile(`\((codex-tui|codex_cli_rs|
 type clientVersionCache struct {
 	mu       sync.RWMutex
 	versions map[string]string
+	lookups  map[string]clientUserAgentLookup
+}
+
+type clientUserAgentLookup struct {
+	LastAttempt *time.Time
+	LastSuccess *time.Time
+	Result      string
 }
 
 var nativeClientVersions = clientVersionCache{versions: map[string]string{

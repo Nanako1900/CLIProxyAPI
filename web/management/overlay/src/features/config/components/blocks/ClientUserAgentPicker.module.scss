@@ -48,3 +48,27 @@
   resize: vertical;
   font-family: monospace;
 }
+.filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 12px;
+  align-items: end;
+}
+.metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  dt {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+  dd {
+    margin: 4px 0 0;
+    overflow-wrap: anywhere;
+  }
+}
+@media (max-width: 600px) {
+  .filters {
+    grid-template-columns: 1fr;
+  }
+}

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Select } from '@/components/ui/Select';
+import { Input } from '@/components/ui/Input';
 import { apiClient } from '@/services/api/client';
 import {
   clientUserAgentsConnection,
@@ -16,11 +17,12 @@ import styles from './ClientUserAgentPicker.module.scss';
 
 type Props = {
   provider: ClientProvider;
+  limit?: number;
   disabled?: boolean;
   onChange: (patch: Partial<VisualConfigValues>) => void;
 };
 
-export function ClientUserAgentPicker({ provider, disabled, onChange }: Props) {
+export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChange }: Props) {
   const { t, i18n } = useTranslation();
   const apiBase = useAuthStore((state) => state.apiBase);
   const managementKey = useAuthStore((state) => state.managementKey);
@@ -38,6 +40,9 @@ export function ClientUserAgentPicker({ provider, disabled, onChange }: Props) {
   const [applied, setApplied] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [raw, setRaw] = useState('');
+  const [search, setSearch] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('all');
+  const [copyState, setCopyState] = useState('');
   const ns = 'client_user_agents.';
   const currentRevision = apiClient.getConnectionRevision();
   const current = authenticated && catalog.revision === currentRevision;
@@ -60,6 +65,9 @@ export function ClientUserAgentPicker({ provider, disabled, onChange }: Props) {
       setSelected('');
       setImportOpen(false);
       setRaw('');
+      setSearch('');
+      setSourceFilter('all');
+      setCopyState('');
       setCatalog({ items: [], revision: -1 });
     });
     if (authenticated) {
@@ -68,9 +76,8 @@ export function ClientUserAgentPicker({ provider, disabled, onChange }: Props) {
         .then((result) => {
           if (valid()) setCatalog({ items: result.items, revision });
         })
-        .catch((cause: unknown) => {
-          if (valid())
-            setError(cause instanceof Error ? cause.message : t('client_user_agents.load_error'));
+        .catch(() => {
+          if (valid()) setError(t('client_user_agents.load_error'));
         })
         .finally(() => {
           if (valid()) setLoading(false);
@@ -120,8 +127,8 @@ export function ClientUserAgentPicker({ provider, disabled, onChange }: Props) {
       setImportOpen(false);
       setRaw('');
       setApplied(false);
-    } catch (cause: unknown) {
-      if (valid()) setError(cause instanceof Error ? cause.message : t(ns + 'import_error'));
+    } catch {
+      if (valid()) setError(t(ns + 'import_error'));
     } finally {
       if (valid()) setBusy(false);
     }
@@ -141,9 +148,9 @@ export function ClientUserAgentPicker({ provider, disabled, onChange }: Props) {
         items: previous.items.filter((item) => item.id !== entry.id),
       }));
       setSelected('');
-    } catch (cause: unknown) {
+    } catch {
       if (request === generation.current && revision === apiClient.getConnectionRevision()) {
-        setError(cause instanceof Error ? cause.message : t(ns + 'delete_error'));
+        setError(t(ns + 'delete_error'));
       }
     } finally {
       if (request === generation.current && revision === apiClient.getConnectionRevision())
@@ -158,10 +165,17 @@ export function ClientUserAgentPicker({ provider, disabled, onChange }: Props) {
   const options = [
     { value: 'auto', label: t(ns + 'auto') },
     { value: 'native', label: t(ns + 'native') },
-    ...(current ? catalog.items : []).map((item) => ({
-      value: item.id,
-      label: `${source(item)} · ${item.headers['User-Agent']}${item.headers['X-Stainless-Package-Version'] ? ' · SDK ' + item.headers['X-Stainless-Package-Version'] : ''}`,
-    })),
+    ...(current ? catalog.items : [])
+      .filter(
+        (item) =>
+          (sourceFilter === 'all' ||
+            (sourceFilter === 'observed' ? item.observed : item.imported)) &&
+          Object.values(item.headers).join(' ').toLowerCase().includes(search.toLowerCase())
+      )
+      .map((item) => ({
+        value: item.id,
+        label: `${source(item)} · ${item.headers['User-Agent']}${item.headers['X-Stainless-Package-Version'] ? ' · SDK ' + item.headers['X-Stainless-Package-Version'] : ''}`,
+      })),
   ];
 
   return (
@@ -199,6 +213,39 @@ export function ClientUserAgentPicker({ provider, disabled, onChange }: Props) {
       </div>
       <p className={styles.hint}>{t(ns + 'description')}</p>
       <p className={styles.hint}>{t(ns + provider + '_scope')}</p>
+      <div className={styles.filters}>
+        <Input
+          label={t('ua_panel.search_samples')}
+          value={search}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setSelected('');
+            setApplied(false);
+            setCopyState('');
+          }}
+          disabled={blocked}
+        />
+        <Select
+          value={sourceFilter}
+          ariaLabel={t('ua_panel.sample_source')}
+          disabled={blocked}
+          options={['all', 'observed', 'imported'].map((value) => ({
+            value,
+            label: t('ua_panel.source_' + value),
+          }))}
+          onChange={(value) => {
+            setSourceFilter(value);
+            setSelected('');
+            setApplied(false);
+            setCopyState('');
+          }}
+        />
+      </div>
+      {current && (
+        <p className={styles.hint}>
+          {t('ua_panel.sample_total', { count: catalog.items.length, limit })}
+        </p>
+      )}
       <Select
         value={selected}
         options={options}
@@ -218,6 +265,22 @@ export function ClientUserAgentPicker({ provider, disabled, onChange }: Props) {
             {new Date(entry.lastSeen).toLocaleString(i18n.language)} ·{' '}
             {t(ns + 'count', { count: entry.count })}
           </p>
+          <dl className={styles.metadata}>
+            <div>
+              <dt>{t('ua_panel.first_seen')}</dt>
+              <dd>{new Date(entry.firstSeen).toLocaleString(i18n.language)}</dd>
+            </div>
+            <div>
+              <dt>{t('ua_panel.client_version')}</dt>
+              <dd>{entry.version}</dd>
+            </div>
+            <div>
+              <dt>{t('ua_panel.sample_id')}</dt>
+              <dd>
+                <code>{entry.id}</code>
+              </dd>
+            </div>
+          </dl>
           <pre>
             {Object.entries(entry.headers)
               .map(([key, value]) => `${key}: ${value}`)
@@ -250,6 +313,28 @@ export function ClientUserAgentPicker({ provider, disabled, onChange }: Props) {
           <Button
             type="button"
             size="sm"
+            variant="secondary"
+            disabled={blocked}
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(
+                  Object.entries(entry.headers)
+                    .map(([name, value]) => `${name}: ${value}`)
+                    .join('\n')
+                );
+                setCopyState('copied');
+              } catch {
+                setCopyState('copy_failed');
+              }
+            }}
+          >
+            {t('ua_panel.copy_headers')}
+          </Button>
+        )}
+        {entry && (
+          <Button
+            type="button"
+            size="sm"
             variant="ghost"
             disabled={blocked}
             onClick={() => void remove()}
@@ -258,6 +343,11 @@ export function ClientUserAgentPicker({ provider, disabled, onChange }: Props) {
           </Button>
         )}
       </div>
+      {copyState && (
+        <p role="status" className={styles.hint}>
+          {t('ua_panel.' + copyState)}
+        </p>
+      )}
       {applied && (
         <p role="status" className={styles.hint}>
           {t(ns + 'applied')}
