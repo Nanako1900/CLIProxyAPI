@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -35,6 +36,9 @@ type quotaShadowRecorder struct {
 	path          string
 	maxBytes      atomic.Int64
 	softLimitBits atomic.Uint64
+	running       atomic.Bool
+	predecessor   <-chan struct{}
+	monitor       quotaShadowMonitor
 
 	mu      sync.RWMutex
 	closed  bool
@@ -48,13 +52,19 @@ type quotaShadowRecorder struct {
 }
 
 func newQuotaShadowRecorder(settings quotaShadowSettings) *quotaShadowRecorder {
+	return newQuotaShadowRecorderAfter(settings, nil)
+}
+
+func newQuotaShadowRecorderAfter(settings quotaShadowSettings, predecessor <-chan struct{}) *quotaShadowRecorder {
 	if settings.maxBytes <= 0 {
 		settings.maxBytes = quotaShadowDefaultMaxBytes
 	}
 	r := &quotaShadowRecorder{
-		path:  settings.path,
-		queue: make(chan quotaShadowJob, quotaShadowQueueSize),
-		done:  make(chan struct{}),
+		path:        settings.path,
+		queue:       make(chan quotaShadowJob, quotaShadowQueueSize),
+		done:        make(chan struct{}),
+		predecessor: predecessor,
+		monitor:     newQuotaShadowMonitor(),
 	}
 	r.update(settings)
 	go r.run()
@@ -114,11 +124,16 @@ func (r *quotaShadowRecorder) close() {
 func (r *quotaShadowRecorder) run() {
 	defer close(r.done)
 	defer r.closeFile()
+	if r.predecessor != nil {
+		<-r.predecessor
+	}
+	r.running.Store(true)
 	for job := range r.queue {
 		line := r.render(job)
 		if len(line) == 0 {
 			continue
 		}
+		r.recordStatus(line)
 		r.write(append(line, '\n'))
 	}
 }
@@ -128,7 +143,8 @@ func (r *quotaShadowRecorder) run() {
 func (r *quotaShadowRecorder) render(job quotaShadowJob) (line []byte) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			log.Errorf("quota shadow: record rendering panicked: %v", recovered)
+			r.recordFailure("render_failed", true)
+			log.Error("quota shadow: record rendering panicked")
 			line = nil
 		}
 	}()
@@ -136,11 +152,9 @@ func (r *quotaShadowRecorder) render(job quotaShadowJob) (line []byte) {
 }
 
 func (r *quotaShadowRecorder) write(line []byte) {
-	if r.file != nil && r.size+int64(len(line)) > r.maxBytes.Load() && r.size > 0 {
-		r.rotate()
-	}
 	if r.file == nil {
 		if errOpen := r.openFile(); errOpen != nil {
+			r.recordFailure("open_failed", false)
 			if !r.warnedOpen {
 				r.warnedOpen = true
 				log.WithError(errOpen).Warn("quota shadow: failed to open output file; records are discarded")
@@ -148,12 +162,33 @@ func (r *quotaShadowRecorder) write(line []byte) {
 			return
 		}
 	}
+	// Check after opening too: an existing log may already exceed the new limit.
+	if r.size+int64(len(line)) > r.maxBytes.Load() && r.size > 0 {
+		if errRotate := r.rotate(); errRotate != nil {
+			r.recordFailure("rotate_failed", false)
+			log.WithError(errRotate).Warn("quota shadow: failed to rotate output file")
+			return
+		}
+		if errOpen := r.openFile(); errOpen != nil {
+			r.recordFailure("open_failed", false)
+			return
+		}
+	}
 	n, errWrite := r.file.Write(line)
 	r.size += int64(n)
+	if errWrite == nil && n != len(line) {
+		errWrite = io.ErrShortWrite
+	}
 	if errWrite != nil {
+		r.recordFailure("write_failed", false)
 		log.WithError(errWrite).Warn("quota shadow: failed to write record")
 		r.closeFile()
+		return
 	}
+	r.monitor.mu.Lock()
+	r.monitor.status.Written++
+	r.monitor.status.LastError = ""
+	r.monitor.mu.Unlock()
 }
 
 func (r *quotaShadowRecorder) openFile() error {
@@ -163,6 +198,13 @@ func (r *quotaShadowRecorder) openFile() error {
 	}
 	if errMkdir := os.MkdirAll(filepath.Dir(path), 0o700); errMkdir != nil {
 		return fmt.Errorf("quota shadow: create directory: %w", errMkdir)
+	}
+	if info, errStat := os.Lstat(path); errStat == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("quota shadow: output must be a regular file")
+		}
+	} else if !os.IsNotExist(errStat) {
+		return fmt.Errorf("quota shadow: inspect output: %w", errStat)
 	}
 	file, errOpen := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if errOpen != nil {
@@ -181,11 +223,12 @@ func (r *quotaShadowRecorder) openFile() error {
 	return nil
 }
 
-func (r *quotaShadowRecorder) rotate() {
+func (r *quotaShadowRecorder) rotate() error {
 	r.closeFile()
 	if errRename := os.Rename(r.path, r.path+".1"); errRename != nil && !os.IsNotExist(errRename) {
-		log.WithError(errRename).Warn("quota shadow: failed to rotate output file")
+		return errRename
 	}
+	return nil
 }
 
 func (r *quotaShadowRecorder) closeFile() {

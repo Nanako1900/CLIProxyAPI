@@ -14,6 +14,9 @@ logins, keeps it optional for plugins, sends it in a POST body, and explains the
 plugin, using its existing authenticated refresh-token login API.
 `account-pools.patch` adds the Account pools navigation and route, with localized
 pool definitions, client grants, account assignment and protocol base URLs.
+`quota-shadow.patch` adds the Quota shadow navigation, route and seven locales.
+See [Quota shadow](quota-shadow.md) for configuration, runtime statistics,
+the review fixes, and verification steps.
 `overlay/` contains the new React component, API adapter,
 configuration mapping, styles, and regression tests. It uses the existing v8
 management client, connection guards, controls, and configuration save flow. It

@@ -2120,7 +2120,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 		m.scheduler.upsertAuthResult(authSnapshot, targetModels, credentialScopedResult)
 	}
 	if authSnapshot != nil {
-		m.observeQuotaShadowResult(result, authSnapshot, now)
+		m.observeQuotaShadowResult(ctx, result, authSnapshot, now)
 	}
 	if authSnapshot != nil && cooldownStateChanged {
 		m.persistCooldownStates(context.Background())

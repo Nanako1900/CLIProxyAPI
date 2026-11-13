@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -149,6 +150,8 @@ func TestAccountPoolHTTPDispatchStaysInsidePool(t *testing.T) {
 	cfg.AccountPools.Unscoped = config.PoolUnscopedConfig{Mode: "default", PoolID: "basic"}
 	server := newTestServerWithConfig(t, cfg)
 	manager := server.handlers.AuthManager
+	// Production services always install a host, even with no active scheduler.
+	manager.SetPluginScheduler(pluginhost.New())
 	e := &poolHTTPExecutor{}
 	manager.RegisterExecutor(e)
 	for _, item := range []struct{ id, pool string }{{"http-basic", "basic"}, {"http-premium", "premium"}} {

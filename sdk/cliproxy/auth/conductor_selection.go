@@ -36,6 +36,10 @@ func (m *Manager) hasPluginScheduler() bool {
 	m.mu.RLock()
 	scheduler := m.pluginScheduler
 	m.mu.RUnlock()
+	return pluginSchedulerIsActive(scheduler)
+}
+
+func pluginSchedulerIsActive(scheduler PluginScheduler) bool {
 	if scheduler == nil {
 		return false
 	}
@@ -2260,8 +2264,13 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 	pinnedAuthID := pinnedAuthIDFromMetadata(opts.Metadata)
 	eligibility := authSelectionEligibilityForRequest(ctx, opts)
 	pluginScheduler, schedulerAcross := m.snapshotPluginScheduler()
-	if _, scoped := pool.FromContext(ctx); scoped && pluginScheduler != nil {
-		return nil, nil, &poolError{"pool_adapter_unsupported", http.StatusNotImplemented}
+	if _, scoped := pool.FromContext(ctx); scoped {
+		if pluginSchedulerIsActive(pluginScheduler) {
+			return nil, nil, &poolError{"pool_adapter_unsupported", http.StatusNotImplemented}
+		}
+		// The service always installs a host. An inactive host is not a scheduler.
+		// Do not invoke it later if a plugin becomes active during this selection.
+		pluginScheduler, schedulerAcross = nil, false
 	}
 
 	m.mu.RLock()
@@ -2723,8 +2732,12 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 		return nil, nil, "", &Error{Code: "provider_not_found", Message: "no provider supplied"}
 	}
 	pluginScheduler, schedulerAcross := m.snapshotPluginScheduler()
-	if _, scoped := pool.FromContext(ctx); scoped && pluginScheduler != nil {
-		return nil, nil, "", &poolError{"pool_adapter_unsupported", http.StatusNotImplemented}
+	if _, scoped := pool.FromContext(ctx); scoped {
+		if pluginSchedulerIsActive(pluginScheduler) {
+			return nil, nil, "", &poolError{"pool_adapter_unsupported", http.StatusNotImplemented}
+		}
+		// Keep scoped selection native even if a plugin activates after this check.
+		pluginScheduler, schedulerAcross = nil, false
 	}
 
 	m.mu.RLock()
