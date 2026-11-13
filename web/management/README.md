@@ -12,6 +12,8 @@ it in English and Chinese, keeping Linux test order from breaking the build.
 logins, keeps it optional for plugins, sends it in a POST body, and explains the separate browser proxy setting.
 `kiro-json-import.patch` adds a credential import option for the Kiro multi-method
 plugin, using its existing authenticated refresh-token login API.
+`account-pools.patch` adds the Account pools navigation and route, with localized
+pool definitions, client grants, account assignment and protocol base URLs.
 `overlay/` contains the new React component, API adapter,
 configuration mapping, styles, and regression tests. It uses the existing v8
 management client, connection guards, controls, and configuration save flow. It
@@ -47,6 +49,18 @@ layout at a narrow viewport and that changing connections clears old samples.
 See [the user guide](../../docs/user-agent-settings.md) for usage and scope.
 See [OAuth account proxies](../../docs/oauth-account-proxies.md) for login routing
 and the separate browser, OAuth, and inference User-Agent behavior.
+See [Account pools](../../docs/account-pools.md#web-management-panel) for the pool
+setup sequence, restart requirement, live membership verification and limitations.
+
+For account-pool UI verification, use an isolated CPA with dummy keys and a
+temporary auth directory. Create a pool, save grants, move both an OAuth account
+and a configured API key, and verify persisted and live membership. Change the
+configuration concurrently to confirm a stale save is rejected and its draft
+retained. Check connection changes, a narrow viewport, and explicit unassignment.
+The tests cover source preservation, omitted grants, wildcard validation, ETags,
+connection revisions (including ABA switches), missing ETags, and localized
+disabled controls. Drafts and raw errors containing credentials are never stored
+in browser persistence or rendered in error messages.
 
 ## Kiro credential JSON import
 

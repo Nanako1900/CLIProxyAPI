@@ -85,3 +85,45 @@ func TestCredentialPoolPersistsAndChecksETag(t *testing.T) {
 		t.Fatal("unassignment not persisted")
 	}
 }
+
+func TestPoolCredentialInventoryIsSecretFreeAndVersioned(t *testing.T) {
+	manager := coreauth.NewManager(nil, nil, nil)
+	for _, a := range []*coreauth.Auth{
+		{ID: "oauth", Provider: "codex", Label: "OAuth account", Metadata: map[string]any{"pool_id": "premium", "access_token": "hidden-token"}},
+		{ID: "configured", Provider: "claude", PoolID: "basic", Disabled: true, Attributes: map[string]string{coreauth.AttributeAPIKey: "hidden-api-key", coreauth.AttributeSource: "config:claude"}},
+		{ID: "plugin", Provider: "custom", Attributes: map[string]string{coreauth.AttributePluginVirtual: "true"}},
+	} {
+		if _, err := manager.Register(context.Background(), a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := NewHandlerWithoutConfigFilePath(&config.Config{}, manager)
+	router := gin.New()
+	router.GET("/inventory", h.ListPoolCredentials)
+	router.GET("/pool", h.GetCredentialPool)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest("GET", "/inventory", nil))
+	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("inventory: %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "hidden-") || strings.Contains(rec.Body.String(), "access_token") {
+		t.Fatal("inventory leaked auth material")
+	}
+	items := ojson.GetBytes(rec.Body.Bytes(), "items").Array()
+	if len(items) != 3 {
+		t.Fatalf("got %d members", len(items))
+	}
+	for i, source := range []string{"config", "credential", "plugin"} {
+		if items[i].Get("source").String() != source {
+			t.Fatalf("source: %s", items[i].Raw)
+		}
+		read := httptest.NewRecorder()
+		router.ServeHTTP(read, httptest.NewRequest("GET", "/pool?id="+items[i].Get("id").String(), nil))
+		if read.Header().Get("ETag") != items[i].Get("etag").String() {
+			t.Fatal("list ETag does not match individual membership view")
+		}
+	}
+	if items[0].Get("pool_id").String() != "basic" || !items[0].Get("disabled").Bool() || items[1].Get("pool_id").String() != "premium" {
+		t.Fatal("inventory does not reflect runtime membership")
+	}
+}

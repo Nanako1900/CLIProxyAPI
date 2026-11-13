@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net/http"
+	"sort"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
@@ -16,8 +17,50 @@ func credentialPoolETag(a *coreauth.Auth) string {
 }
 
 func writeCredentialPool(c *gin.Context, a *coreauth.Auth) {
+	c.Header("Cache-Control", "no-store")
 	c.Header("ETag", credentialPoolETag(a))
 	c.JSON(http.StatusOK, gin.H{"id": a.ID, "pool_id": a.AccountPoolID()})
+}
+
+// ListPoolCredentials exposes only the live membership and mutation token, never auth material.
+func (h *Handler) ListPoolCredentials(c *gin.Context) {
+	if h.authManager == nil {
+		c.JSON(503, gin.H{"error": "pool_state_unavailable"})
+		return
+	}
+	type member struct {
+		ID        string `json:"id"`
+		AuthIndex string `json:"auth_index"`
+		Name      string `json:"name"`
+		Provider  string `json:"provider"`
+		PoolID    string `json:"pool_id"`
+		Source    string `json:"source"`
+		Disabled  bool   `json:"disabled"`
+		ETag      string `json:"etag"`
+	}
+	items := make([]member, 0)
+	for _, a := range h.authManager.List() {
+		if a == nil {
+			continue
+		}
+		source := "credential"
+		if coreauth.IsConfigAPIKeyAuth(a) {
+			source = "config"
+		} else if coreauth.IsPluginVirtualAuth(a) {
+			source = "plugin"
+		}
+		name := a.Label
+		if name == "" {
+			name = a.FileName
+		}
+		if name == "" {
+			name = a.ID
+		}
+		items = append(items, member{a.ID, a.Index, name, a.Provider, a.AccountPoolID(), source, a.Disabled, credentialPoolETag(a)})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
 // GetCredentialPool returns a secret-free membership view with a concurrency token.

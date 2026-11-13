@@ -7,6 +7,42 @@ is `https://proxy.example/pools/premium`. Gemini uses the same prefix followed
 by `/v1beta`. These are inbound prefixes, independent of upstream `base-url`
 and model-name `prefix`.
 
+## Web management panel
+
+Deploy the backend and source-built management panel from the same revision.
+The repository Dockerfile bundles both. Open **Account pools** in the left
+navigation (`management.html#/account-pools`). If the entry is absent, rebuild
+the image or rebuild the panel with `web/management/build.sh`; an independently
+downloaded upstream panel does not contain this extension. An explicit
+`MANAGEMENT_STATIC_PATH` overrides the bundled panel and must also be updated.
+
+1. Create pools, choose names and scheduling strategies, and save. Saved IDs
+   are immutable in the UI; retire a pool by disabling it.
+2. Grant existing access keys a shared pool list, or add dedicated client keys
+   with individual grants. External authenticated identities have their own
+   section. Empty grants deny access; `*` explicitly includes future pools.
+   Keys stay masked and drafts are not written to browser storage.
+3. Under **Account membership**, search/filter accounts and choose **Assign
+   pool**. OAuth membership uses its versioned management endpoint. API-key
+   membership changes only its provider configuration list, preserving other
+   key settings and group policies. An explicit unassignment overrides an
+   inherited group pool. Plugin-owned accounts cannot be moved here.
+4. Enable isolation only after preparing pools, grants and membership, then
+   restart CPA. Changes to the isolation switch require a restart in either
+   direction. Copy the protocol-specific base URL from the desired pool card.
+5. Refresh and compare the configured API-key pool with live membership. A
+   mismatch is displayed explicitly: drain traffic and reapply the assignment,
+   or restart after draining. Saving the source alone does not prove that a
+   busy credential has moved at runtime.
+
+Settings and memberships use ETags and the originating authenticated connection.
+A concurrent change returns a conflict instead of overwriting a newer version;
+refresh, review and reapply. Unsaved settings disable membership edits, and
+navigation/refresh prompts before discarding a draft. Failed or unconfirmed
+writes require readback before retrying. The page does not automatically retry
+mutations. It displays supported protocols and restart requirements; it does not
+implement batch membership transactions or pool accounting reports.
+
 ## Configuration
 
 Merge this example into a v8 configuration. Replace all example secrets.
@@ -100,8 +136,8 @@ The built-in Grok-specific model catalog is bypassed for scoped requests.
 
 Do not enable account pools on an instance requiring those adapters. Their
 cross-service and resource-ownership contracts are specified in
-[the full design](account-pools-design.md), along with the remaining management UI,
-batch API, audit/revision persistence, and accounting dashboard work.
+[the full design](account-pools-design.md), along with the remaining batch API,
+audit/revision persistence, and accounting dashboard work.
 
 ## Membership management
 
@@ -118,6 +154,9 @@ configuration; OAuth membership has a separate endpoint:
 
 The endpoint exposes no credentials or tokens. It uses the existing management
 authentication. Missing `If-Match` returns 428; stale state returns 412.
+`GET /v8/management/account-pools/credentials` supplies the panel with a
+secret-free live inventory, source classification and per-account ETags.
+It returns `Cache-Control: no-store` and includes disabled/unassigned accounts.
 An active upstream operation returns 409 `credential_busy`. Stop new traffic to
 the source pool, let requests finish, read a fresh ETag, and retry. Config-source
 and plugin-owned credentials must be changed at their source.
