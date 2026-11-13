@@ -14,6 +14,12 @@ logins, keeps it optional for plugins, sends it in a POST body, and explains the
 plugin, using its existing authenticated refresh-token login API.
 `account-pools.patch` adds the Account pools navigation and route, with localized
 pool definitions, client grants, account assignment and protocol base URLs.
+`user-agents.patch` moves identity editing into a dedicated **UA control panel**
+sidebar page with seven locales. It leaves searchable links in the Advanced header
+section. The page combines provider defaults, automatic release lookup history,
+credential overrides, searchable samples, editable identity policies and a header
+construction reference. Saved runtime state is separate from the draft; saves
+patch only changed leaves with ETag and connection-revision guards.
 `overlay/` contains the new React component, API adapter,
 configuration mapping, styles, and regression tests. It uses the existing v8
 management client, connection guards, controls, and configuration save flow. It
@@ -47,6 +53,11 @@ bodies are absent from catalog responses and its YAML file. Also inspect the
 layout at a narrow viewport and that changing connections clears old samples.
 
 See [the user guide](../../docs/user-agent-settings.md) for usage and scope.
+For the UA panel, also verify provider switching, sample search/source filtering,
+the old Advanced links, review of both providers' changes, conflict draft retention,
+and narrow-screen layout. Runtime reports exclude credential secrets and describe
+defaults rather than a captured outbound request. The status API is read-only and
+never triggers npm lookups.
 See [OAuth account proxies](../../docs/oauth-account-proxies.md) for login routing
 and the separate browser, OAuth, and inference User-Agent behavior.
 See [Account pools](../../docs/account-pools.md#web-management-panel) for the pool

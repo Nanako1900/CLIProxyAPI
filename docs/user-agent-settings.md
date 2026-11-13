@@ -1,8 +1,10 @@
 # Codex and Claude Code User-Agent settings
 
-Use the existing management panel's **Configuration → Advanced → Default headers**
-fields. The Docker image bundles the panel with a client UA picker; no plugin
-installation is required. Save the configuration to apply changes to subsequent
+Open **UA control panel** in the management sidebar (`#/user-agents`). Claude Code
+and Codex have separate views for configuration, runtime defaults, client samples
+and identity rules. **Configuration → Advanced → Default headers** now links to
+this dedicated panel. The Docker image bundles it; no plugin installation is
+required. Save the configuration to apply changes to subsequent
 upstream requests without restarting CPA. Existing WebSocket connections retain
 their handshake until reconnected.
 
@@ -15,14 +17,18 @@ their handshake until reconnected.
 ## Pick an identity from your clients
 
 1. Connect Claude Code or Codex to CPA and send a request using a valid CPA access
-   key. Open **Configuration → Advanced → Default headers** and refresh the
+   key. Open **UA control panel** and refresh the
    corresponding **client UA list**. Collection starts after this version is
    deployed; historical logs are not imported.
-2. Select a sample. The preview shows its headers, source, last recorded time,
-   and observed request count. **Use this UA** fills only the UA field.
+2. Filter by source or search UA, SDK, Node and platform values. Select a sample.
+   The preview shows every supported header, sample ID, parsed client version,
+   source, first/last recorded times and observed request count. Headers can be
+   copied. **Use this UA** fills only the UA field.
    **Use UA and captured fields** also fills the supported fields in that sample.
    Missing fields, timezone, and device stabilization settings stay unchanged.
-3. Use the page's normal **Save changes → Confirm save** flow. Collection,
+3. Use **Review and save → Save changes** to review old and new values for both
+   providers. Only edited fields are patched, with an ETag guard against concurrent
+   configuration changes. A rejected save keeps the draft. Collection,
    importing, and selecting a sample never automatically change active settings.
 
 Alternatively, click **Import request headers**, paste a header block or raw HTTP
@@ -68,6 +74,33 @@ client and sending another request makes its new identity available in the list.
 Credential `headers.User-Agent` takes precedence over the provider default. Header
 names are case insensitive. Existing `$Header-Name` credential mappings continue
 to work. Clearing a provider default does not clear a credential override.
+
+## Inspect runtime state and identity rules
+
+The panel distinguishes saved runtime state from the editable draft. It displays
+the built-in UA, resolved provider default, SDK/Node/platform baseline, Claude
+billing version, cached release version, last lookup attempt/success/result,
+lookup interval and catalog persistence mode. Refresh reads this state; it does
+not force a registry query. Lookup timestamps and release caches are process-local.
+The copyable report contains this runtime metadata, not configuration secrets.
+
+Loaded credential UA overrides are listed read-only with source, display label,
+auth index and disabled state. They remain editable at their credential or API-key
+configuration source. No tokens, account identifiers, raw credential metadata or
+credential file paths are included in the status response.
+
+Claude controls include SDK and Node versions, OS, architecture, the declared SDK
+timeout header, timezone, device stabilization, diagnostics, request-ID policy,
+additional native entrypoints, and Beta removal/addition. Codex also exposes its
+WebSocket Beta-feature fallback. The expandable reference explains authentication,
+CLI/SDK markers, Betas, session/request/agent identifiers, remote-environment and
+additional-protection headers, native request hints, body identity and transport.
+
+These values describe provider defaults and construction rules, not an actual
+outbound request. Credential selection, caller headers and request shape can
+change the final result. In particular, automatic UA updates do not synchronize
+SDK/Node, billing or the TLS template; the panel flags a differing Claude UA and
+billing version. OAuth login/refresh uses a separate control-plane identity.
 
 ## Scope
 
