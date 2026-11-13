@@ -16,7 +16,13 @@ func Register(cfg *sdkconfig.SDKConfig) {
 		return
 	}
 
-	keys := normalizeKeys(cfg.APIKeys)
+	allKeys := append([]string(nil), cfg.APIKeys...)
+	for _, client := range cfg.PoolClients {
+		if client.IsEnabled() {
+			allKeys = append(allKeys, client.APIKey)
+		}
+	}
+	keys := normalizeKeys(allKeys)
 	if len(keys) == 0 {
 		sdkaccess.UnregisterProvider(sdkaccess.AccessProviderTypeConfigAPIKey)
 		return

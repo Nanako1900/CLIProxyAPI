@@ -43,6 +43,7 @@ import (
 // Server represents the main API server.
 // It encapsulates the Gin engine, HTTP server, handlers, and configuration.
 type Server struct {
+	accountPoolsEnabled bool
 	// engine is the Gin web framework engine instance.
 	engine *gin.Engine
 
@@ -168,6 +169,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		handlers:                     handlers.NewBaseAPIHandlers(effectiveSDKConfig(cfg), authManager),
 		tunnelHub:                    wstunnel.NewHub(wstunnel.Options{}),
 		cfg:                          cfg,
+		accountPoolsEnabled:          cfg.AccountPools.Enabled,
 		accessManager:                accessManager,
 		configFilePath:               configFilePath,
 		currentPath:                  wd,
@@ -220,6 +222,9 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	s.oldConfigYaml, _ = yaml.Marshal(cfg)
 	s.applyAccessConfig(nil, cfg)
 	if authManager != nil {
+		if cfg.AccountPools.Enabled {
+			authManager.SetConfig(cfg)
+		}
 		authManager.SetRetryConfig(cfg.RequestRetry, time.Duration(cfg.MaxRetryInterval)*time.Second, cfg.MaxRetryCredentials)
 	}
 	githubauth.SetToken(cfg.GitHubToken)
@@ -256,6 +261,8 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// subscribe-config heartbeat connection is healthy.
 	engine.Use(s.homeHeartbeatMiddleware())
 	engine.Use(s.exampleAPIKeySafeModeMiddleware())
+
+	engine.Use(s.accountPoolMiddleware())
 
 	// Setup routes
 	s.setupRoutes()

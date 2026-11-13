@@ -172,6 +172,9 @@ type resultPolicyHolder struct {
 
 // Manager orchestrates auth lifecycle, selection, execution, and persistence.
 type Manager struct {
+	poolActive                map[string]int
+	poolMoving                map[string]bool
+	poolSelectors             map[string]Selector
 	store                     Store
 	cooldownStore             CooldownStateStore
 	pendingCooldownStateStore CooldownStateStore

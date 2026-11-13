@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	internallogging "github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/pool"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -24,6 +25,8 @@ const AutoServiceTier = "auto"
 
 // Record contains the usage statistics captured for a single provider request.
 type Record struct {
+	// PoolID is captured from the admitted request, never resolved from mutable membership.
+	PoolID string `json:"pool_id,omitempty"`
 	// RequestID uniquely identifies this specific model execution instance (UUID v4).
 	RequestID string
 	// TraceID identifies the parent inbound HTTP request when available (8-character hex).
@@ -736,6 +739,9 @@ func (m *Manager) RegisterNamed(name string, plugin Plugin) {
 // Publish commits to the request-scoped recorder before enqueuing a record for
 // asynchronous plugins. Records without a plugin are discarded downstream.
 func (m *Manager) Publish(ctx context.Context, record Record) {
+	if scope, ok := pool.FromContext(ctx); ok {
+		record.PoolID = scope.ID
+	}
 	if m == nil {
 		return
 	}

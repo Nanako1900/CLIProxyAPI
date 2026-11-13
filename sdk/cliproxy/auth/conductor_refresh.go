@@ -83,9 +83,10 @@ func (m *Manager) StopAutoRefresh() {
 		cancel()
 	}
 	// Stop selector if it implements StoppableSelector (e.g., SessionAffinitySelector)
-	sel := m.Selector()
-	if stoppable, ok := sel.(StoppableSelector); ok && stoppable != nil {
-		stoppable.Stop()
+	for _, sel := range m.selectorsSnapshot() {
+		if stoppable, ok := sel.(StoppableSelector); ok && stoppable != nil {
+			stoppable.Stop()
+		}
 	}
 }
 

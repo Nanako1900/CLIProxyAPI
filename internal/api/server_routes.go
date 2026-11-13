@@ -32,6 +32,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers/openai"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/pool"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 	log "github.com/sirupsen/logrus"
 )
@@ -55,92 +56,8 @@ func (s *Server) setupRoutes() {
 	s.engine.HEAD("/healthz", healthzHandler)
 
 	s.engine.GET("/management.html", s.serveManagementControlPanel)
-	openaiHandlers := openai.NewOpenAIAPIHandler(s.handlers)
-	geminiHandlers := gemini.NewGeminiAPIHandler(s.handlers)
-	claudeCodeHandlers := claude.NewClaudeCodeAPIHandler(s.handlers)
-	openaiResponsesHandlers := openai.NewOpenAIResponsesAPIHandler(s.handlers)
-	openaiResponsesHandlers.AccessManager = s.accessManager
-	s.codexLiveHandler = codexlive.NewHandler(s.handlers.AuthManager, s.cfg)
-
-	// OpenAI compatible API routes
-	v1 := s.engine.Group("/v1")
-	v1.Use(AuthMiddleware(s.accessManager), s.captureClientUserAgent)
-	{
-		v1.GET("/models", s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers))
-		v1.GET("/models/*model", func(c *gin.Context) {
-			c.Set(handlers.ModelDetailIDContextKey, strings.TrimPrefix(c.Param("model"), "/"))
-			s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers)(c)
-		})
-		v1.POST("/chat/completions", openaiHandlers.ChatCompletions)
-		v1.POST("/completions", openaiHandlers.Completions)
-		v1.POST("/images/generations", openaiHandlers.ImagesGenerations)
-		v1.POST("/images/edits", openaiHandlers.ImagesEdits)
-		v1.POST("/videos", openaiHandlers.XAIVideosGenerations)
-		v1.POST("/videos/generations", openaiHandlers.XAIVideosGenerations)
-		v1.POST("/videos/edits", openaiHandlers.XAIVideosEdits)
-		v1.POST("/videos/extensions", openaiHandlers.XAIVideosExtensions)
-		v1.GET("/videos/:request_id", openaiHandlers.XAIVideosRetrieve)
-		v1.POST("/audio/speech", openaiHandlers.AudioSpeech)
-		v1.POST("/tts", openaiHandlers.XAITTS)
-		v1.POST("/messages", claudeCodeHandlers.ClaudeMessages)
-		v1.POST("/messages/count_tokens", claudeCodeHandlers.ClaudeCountTokens)
-		v1.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)
-		v1.POST("/responses", openaiResponsesHandlers.Responses)
-		v1.POST("/responses/compact", openaiResponsesHandlers.Compact)
-		v1.POST("/alpha/search", s.codexAlphaSearch)
-		v1.POST("/live", s.codexLiveHandler.Handle)
-		v1.GET("/live/:call_id", s.codexLiveHandler.HandleSideband)
-	}
-
-	s.engine.GET("/v1/tunnel", s.handleWebsocketTunnel)
-	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodTrace, http.MethodConnect} {
-		s.engine.Handle(method, "/v1/tunnel", s.handleWebsocketTunnel)
-	}
-
-	realtimeAuth := realtimeAuthMiddleware(s.accessManager, s.codexLiveHandler)
-	standardAuth := realtimeStandardAuthMiddleware(s.accessManager)
-	s.engine.GET("/v1/realtime", realtimeAuth, s.codexLiveHandler.HandleRealtimeWebsocket)
-	s.engine.POST("/v1/realtime", realtimeAuth, s.codexLiveHandler.Handle)
-	s.engine.POST("/v1/realtime/calls", realtimeAuth, s.codexLiveHandler.Handle)
-	s.engine.GET("/v1/realtime/calls/:call_id", realtimeAuth, s.codexLiveHandler.HandleSideband)
-	s.engine.POST("/v1/realtime/client_secrets", standardAuth, s.codexLiveHandler.CreateClientSecret)
-	s.engine.POST("/v1/realtime/sessions", standardAuth, s.codexLiveHandler.CreateLegacySession)
-	s.engine.POST("/v1/realtime/transcription_sessions", standardAuth, s.codexLiveHandler.HandleTranscriptionSession)
-	s.engine.GET("/v1/realtime/translations", realtimeAuth, s.codexLiveHandler.HandleTranslation)
-	s.engine.POST("/v1/realtime/translations", realtimeAuth, s.codexLiveHandler.HandleTranslation)
-	s.engine.POST("/v1/realtime/translations/client_secrets", standardAuth, s.codexLiveHandler.HandleTranslation)
-	s.engine.POST("/v1/realtime/calls/:call_id/hangup", standardAuth, s.codexLiveHandler.HandleHangup)
-	s.engine.POST("/v1/realtime/calls/:call_id/accept", standardAuth, s.codexLiveHandler.HandleSIPControl)
-	s.engine.POST("/v1/realtime/calls/:call_id/reject", standardAuth, s.codexLiveHandler.HandleSIPControl)
-	s.engine.POST("/v1/realtime/calls/:call_id/refer", standardAuth, s.codexLiveHandler.HandleSIPControl)
-
-	openaiV1 := s.engine.Group("/openai/v1")
-	openaiV1.Use(AuthMiddleware(s.accessManager))
-	{
-		openaiV1.POST("/videos", openaiHandlers.VideosCreate)
-		openaiV1.GET("/videos/:video_id/content", openaiHandlers.VideosContent)
-		openaiV1.GET("/videos/:video_id", openaiHandlers.VideosRetrieve)
-	}
-
-	// Codex CLI direct route aliases (chatgpt_base_url compatible)
-	codexDirect := s.engine.Group("/backend-api/codex")
-	codexDirect.Use(AuthMiddleware(s.accessManager), s.captureClientUserAgent)
-	{
-		codexDirect.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)
-		codexDirect.POST("/responses", openaiResponsesHandlers.Responses)
-		codexDirect.POST("/responses/compact", openaiResponsesHandlers.Compact)
-		codexDirect.POST("/alpha/search", s.codexAlphaSearch)
-	}
-
-	// Gemini compatible API routes
-	v1beta := s.engine.Group("/v1beta")
-	v1beta.Use(AuthMiddleware(s.accessManager))
-	{
-		v1beta.GET("/models", s.geminiModelsHandler(geminiHandlers))
-		v1beta.POST("/interactions", geminiHandlers.Interactions)
-		v1beta.POST("/models/*action", geminiHandlers.GeminiHandler)
-		v1beta.GET("/models/*action", s.geminiGetHandler(geminiHandlers))
-	}
+	s.setupInferenceRoutes(s.engine)
+	s.setupInferenceRoutes(s.engine.Group("/pools/:pool_id"))
 
 	// Root endpoint
 	s.engine.GET("/", func(c *gin.Context) {
@@ -638,7 +555,8 @@ func isAnthropicModelsRequest(c *gin.Context) bool {
 // route to the Claude handler, otherwise they route to the OpenAI handler.
 func (s *Server) unifiedModelsHandler(openaiHandler *openai.OpenAIAPIHandler, claudeHandler *claude.ClaudeCodeAPIHandler) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if grokbuild.IsGrokShellUserAgent(c.GetHeader("User-Agent")) {
+		_, pooledCatalog := pool.FromContext(c.Request.Context())
+		if !pooledCatalog && grokbuild.IsGrokShellUserAgent(c.GetHeader("User-Agent")) {
 			s.handleGrokModels(c)
 			return
 		}
@@ -1366,4 +1284,96 @@ func homeModelInt64Value(model map[string]any, keys ...string) int64 {
 		}
 	}
 	return 0
+}
+
+func (s *Server) setupInferenceRoutes(root gin.IRouter) {
+	openaiHandlers := openai.NewOpenAIAPIHandler(s.handlers)
+	geminiHandlers := gemini.NewGeminiAPIHandler(s.handlers)
+	claudeCodeHandlers := claude.NewClaudeCodeAPIHandler(s.handlers)
+	openaiResponsesHandlers := openai.NewOpenAIResponsesAPIHandler(s.handlers)
+	openaiResponsesHandlers.AccessManager = s.accessManager
+	if s.codexLiveHandler == nil {
+		s.codexLiveHandler = codexlive.NewHandler(s.handlers.AuthManager, s.cfg)
+	}
+
+	// OpenAI compatible API routes
+	v1 := root.Group("/v1")
+	v1.Use(AuthMiddleware(s.accessManager), s.captureClientUserAgent)
+	{
+		v1.GET("/models", s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers))
+		v1.GET("/models/*model", func(c *gin.Context) {
+			c.Set(handlers.ModelDetailIDContextKey, strings.TrimPrefix(c.Param("model"), "/"))
+			s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers)(c)
+		})
+		v1.POST("/chat/completions", openaiHandlers.ChatCompletions)
+		v1.POST("/completions", openaiHandlers.Completions)
+		v1.POST("/images/generations", openaiHandlers.ImagesGenerations)
+		v1.POST("/images/edits", openaiHandlers.ImagesEdits)
+		v1.POST("/videos", openaiHandlers.XAIVideosGenerations)
+		v1.POST("/videos/generations", openaiHandlers.XAIVideosGenerations)
+		v1.POST("/videos/edits", openaiHandlers.XAIVideosEdits)
+		v1.POST("/videos/extensions", openaiHandlers.XAIVideosExtensions)
+		v1.GET("/videos/:request_id", openaiHandlers.XAIVideosRetrieve)
+		v1.POST("/audio/speech", openaiHandlers.AudioSpeech)
+		v1.POST("/tts", openaiHandlers.XAITTS)
+		v1.POST("/messages", claudeCodeHandlers.ClaudeMessages)
+		v1.POST("/messages/count_tokens", claudeCodeHandlers.ClaudeCountTokens)
+		v1.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)
+		v1.POST("/responses", openaiResponsesHandlers.Responses)
+		v1.POST("/responses/compact", openaiResponsesHandlers.Compact)
+		v1.POST("/alpha/search", s.codexAlphaSearch)
+		v1.POST("/live", s.codexLiveHandler.Handle)
+		v1.GET("/live/:call_id", s.codexLiveHandler.HandleSideband)
+	}
+
+	root.GET("/v1/tunnel", s.handleWebsocketTunnel)
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodTrace, http.MethodConnect} {
+		root.Handle(method, "/v1/tunnel", s.handleWebsocketTunnel)
+	}
+
+	realtimeAuth := realtimeAuthMiddleware(s.accessManager, s.codexLiveHandler)
+	standardAuth := realtimeStandardAuthMiddleware(s.accessManager)
+	root.GET("/v1/realtime", realtimeAuth, s.codexLiveHandler.HandleRealtimeWebsocket)
+	root.POST("/v1/realtime", realtimeAuth, s.codexLiveHandler.Handle)
+	root.POST("/v1/realtime/calls", realtimeAuth, s.codexLiveHandler.Handle)
+	root.GET("/v1/realtime/calls/:call_id", realtimeAuth, s.codexLiveHandler.HandleSideband)
+	root.POST("/v1/realtime/client_secrets", standardAuth, s.codexLiveHandler.CreateClientSecret)
+	root.POST("/v1/realtime/sessions", standardAuth, s.codexLiveHandler.CreateLegacySession)
+	root.POST("/v1/realtime/transcription_sessions", standardAuth, s.codexLiveHandler.HandleTranscriptionSession)
+	root.GET("/v1/realtime/translations", realtimeAuth, s.codexLiveHandler.HandleTranslation)
+	root.POST("/v1/realtime/translations", realtimeAuth, s.codexLiveHandler.HandleTranslation)
+	root.POST("/v1/realtime/translations/client_secrets", standardAuth, s.codexLiveHandler.HandleTranslation)
+	root.POST("/v1/realtime/calls/:call_id/hangup", standardAuth, s.codexLiveHandler.HandleHangup)
+	root.POST("/v1/realtime/calls/:call_id/accept", standardAuth, s.codexLiveHandler.HandleSIPControl)
+	root.POST("/v1/realtime/calls/:call_id/reject", standardAuth, s.codexLiveHandler.HandleSIPControl)
+	root.POST("/v1/realtime/calls/:call_id/refer", standardAuth, s.codexLiveHandler.HandleSIPControl)
+
+	openaiV1 := root.Group("/openai/v1")
+	openaiV1.Use(AuthMiddleware(s.accessManager))
+	{
+		openaiV1.POST("/videos", openaiHandlers.VideosCreate)
+		openaiV1.GET("/videos/:video_id/content", openaiHandlers.VideosContent)
+		openaiV1.GET("/videos/:video_id", openaiHandlers.VideosRetrieve)
+	}
+
+	// Codex CLI direct route aliases (chatgpt_base_url compatible)
+	codexDirect := root.Group("/backend-api/codex")
+	codexDirect.Use(AuthMiddleware(s.accessManager), s.captureClientUserAgent)
+	{
+		codexDirect.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)
+		codexDirect.POST("/responses", openaiResponsesHandlers.Responses)
+		codexDirect.POST("/responses/compact", openaiResponsesHandlers.Compact)
+		codexDirect.POST("/alpha/search", s.codexAlphaSearch)
+	}
+
+	// Gemini compatible API routes
+	v1beta := root.Group("/v1beta")
+	v1beta.Use(AuthMiddleware(s.accessManager))
+	{
+		v1beta.GET("/models", s.geminiModelsHandler(geminiHandlers))
+		v1beta.POST("/interactions", geminiHandlers.Interactions)
+		v1beta.POST("/models/*action", geminiHandlers.GeminiHandler)
+		v1beta.GET("/models/*action", s.geminiGetHandler(geminiHandlers))
+	}
+
 }

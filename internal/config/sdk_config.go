@@ -18,6 +18,11 @@ import (
 
 // SDKConfig represents the application's configuration, loaded from a YAML file.
 type SDKConfig struct {
+	AccountPools        AccountPoolsConfig   `yaml:"account-pools" json:"account-pools"`
+	PoolClients         []PoolClient         `yaml:"pool-clients,omitempty" json:"pool-clients,omitempty"`
+	PoolProviderClients []PoolProviderClient `yaml:"pool-provider-clients,omitempty" json:"pool-provider-clients,omitempty"`
+	LegacyKeyPools      []string             `yaml:"legacy-key-pools,omitempty" json:"legacy-key-pools,omitempty"`
+
 	// MaxRequestBodyBytes limits the size (in bytes) of incoming HTTP request bodies.
 	// Values <= 0 disable the limit (default).
 	MaxRequestBodyBytes int64 `yaml:"max-request-body-bytes" json:"max-request-body-bytes"`

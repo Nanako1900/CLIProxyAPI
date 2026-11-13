@@ -6,6 +6,12 @@ package config
 
 import internalconfig "github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 
+type AccountPoolsConfig = internalconfig.AccountPoolsConfig
+type PoolUnscopedConfig = internalconfig.PoolUnscopedConfig
+type AccountPool = internalconfig.AccountPool
+type PoolClient = internalconfig.PoolClient
+type PoolProviderClient = internalconfig.PoolProviderClient
+
 type SDKConfig = internalconfig.SDKConfig
 
 type Config = internalconfig.Config

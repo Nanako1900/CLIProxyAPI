@@ -18,6 +18,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/pool"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 )
 
@@ -103,7 +104,12 @@ func codexClaudeCodeReplaySessionKey(ctx context.Context, payload []byte, header
 	return sessionKey
 }
 
-func codexReasoningReplaySessionKey(ctx context.Context, from sdktranslator.Format, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, body []byte) string {
+func codexReasoningReplaySessionKey(ctx context.Context, from sdktranslator.Format, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, body []byte) (key string) {
+	defer func() {
+		if key != "" {
+			key = pool.Namespace(ctx, key)
+		}
+	}()
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -140,7 +146,12 @@ func codexReasoningReplaySessionKey(ctx context.Context, from sdktranslator.Form
 	return ""
 }
 
-func codexReasoningReplaySessionKeyDoc(ctx context.Context, from sdktranslator.Format, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, doc *ojson.Doc) string {
+func codexReasoningReplaySessionKeyDoc(ctx context.Context, from sdktranslator.Format, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, doc *ojson.Doc) (key string) {
+	defer func() {
+		if key != "" {
+			key = pool.Namespace(ctx, key)
+		}
+	}()
 	if ctx == nil {
 		ctx = context.Background()
 	}

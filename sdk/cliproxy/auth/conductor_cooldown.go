@@ -174,7 +174,13 @@ func (m *Manager) setConfigSnapshotLocked(cfg *internalconfig.Config) bool {
 	if homeSessionAliasTTL(previousCfg) != homeSessionAliasTTL(cfg) {
 		m.homeSessionAliases.clear()
 	}
+	if previousCfg != nil && previousCfg.AccountPools.Enabled {
+		cfg.AccountPools.Enabled = true
+	}
+	m.mu.Lock()
+	m.reconcilePoolSelectorsLocked(previousCfg, cfg)
 	m.runtimeConfig.Store(cfg)
+	m.mu.Unlock()
 	clearedCooldowns := m.clearDisabledCooldownStates(cfg)
 	if clearedCooldowns && oldCooldownStore != nil {
 		m.mu.Lock()
@@ -2144,14 +2150,14 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 
 	m.hook.OnResult(ctx, result)
 	m.publishErrorEvent(result, authSnapshot)
-	m.updateSessionAffinity(result)
+	m.updateSessionAffinity(ctx, result)
 }
 
-func (m *Manager) updateSessionAffinity(result Result) {
+func (m *Manager) updateSessionAffinity(ctx context.Context, result Result) {
 	if m == nil {
 		return
 	}
-	sel := m.Selector()
+	sel := m.selectorForContext(ctx)
 	if affinity, ok := sel.(interface {
 		OnResult(Result)
 	}); ok && affinity != nil {
@@ -2189,7 +2195,7 @@ func (m *Manager) reportHomeResult(ctx context.Context, result Result, auth *Aut
 	}
 	m.hook.OnResult(ctx, result)
 	m.publishErrorEvent(result, snapshot)
-	m.updateSessionAffinity(result)
+	m.updateSessionAffinity(ctx, result)
 }
 
 func (m *Manager) recordAvailabilityNeutralResult(ctx context.Context, result Result) {
