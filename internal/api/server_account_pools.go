@@ -10,7 +10,7 @@ import (
 )
 
 // accountPoolMiddleware fails closed for adapters that have not implemented the
-// pool contract. Management and OAuth callbacks keep their existing auth policy.
+// pool contract. Management, plugin resources, and OAuth callbacks keep their existing auth policy.
 func (s *Server) accountPoolMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
@@ -124,7 +124,7 @@ func poolControlPath(path string) bool {
 	if path == "/" || path == "/healthz" || path == "/management.html" || path == "/usage.html" {
 		return true
 	}
-	for _, prefix := range []string{"/v8/management", "/v0/management"} {
+	for _, prefix := range []string{"/v8/management", "/v0/management", "/v0/resource/plugins"} {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}
