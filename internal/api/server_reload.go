@@ -73,6 +73,9 @@ func (s *Server) UpdateClientsContext(ctx context.Context, cfg *config.Config) b
 	if len(oldConfigYaml) > 0 {
 		_ = yaml.Unmarshal(oldConfigYaml, &oldCfg)
 	}
+	if (oldCfg == nil || oldCfg.AccountPools.Enabled != cfg.AccountPools.Enabled) && s.accountPoolsEnabled != cfg.AccountPools.Enabled {
+		log.WithField("code", "pool_restart_required").Warn("account pool isolation changed; inference returns 503 until the CPA process or container is restarted")
+	}
 
 	// Update request logger enabled state if it has changed
 	previousRequestLog := false

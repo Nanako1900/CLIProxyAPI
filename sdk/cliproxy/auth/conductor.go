@@ -259,6 +259,8 @@ type Manager struct {
 	quotaShadowStopped bool
 	// quotaShadowClosing tracks replaced recorders that are still draining.
 	quotaShadowClosing sync.WaitGroup
+	// quotaShadowLast retains the latest session and serializes file ownership across reloads.
+	quotaShadowLast *quotaShadowRecorder
 }
 
 // NewManager constructs a manager with optional custom selector and hook.

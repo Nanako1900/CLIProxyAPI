@@ -39,6 +39,7 @@ func (s *Server) registerManagementV8Routes() {
 	v8.POST("/models/refresh", s.mgmt.RefreshModelDefinitions)
 
 	v8.GET("/observability/logs", s.mgmt.GetLogs)
+	v8.GET("/observability/quota-shadow", s.mgmt.GetQuotaShadowStatus)
 	v8.DELETE("/observability/logs", s.mgmt.DeleteLogs)
 	v8.GET("/observability/logs/errors", s.mgmt.GetRequestErrorLogs)
 	v8.GET("/observability/logs/errors/:name", s.mgmt.DownloadRequestErrorLog)
@@ -53,6 +54,7 @@ func (s *Server) registerManagementV8Routes() {
 
 	v8.GET("/credentials/pool", s.mgmt.GetCredentialPool)
 	v8.GET("/account-pools/credentials", s.mgmt.ListPoolCredentials)
+	v8.GET("/account-pools/status", s.accountPoolStatus)
 	v8.PATCH("/credentials/pool", s.mgmt.PatchCredentialPool)
 	v8.GET("/credentials", s.mgmt.ListAuthFiles)
 	v8.POST("/credentials", s.mgmt.UploadAuthFileV8)

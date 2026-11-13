@@ -295,6 +295,9 @@ func (cfg *Config) UnmarshalYAML(node *yaml.Node) error {
 	if errValidate := (*Config)(&decoded).ValidateAccountPools(); errValidate != nil {
 		return errValidate
 	}
+	if errValidate := decoded.Routing.QuotaShadow.Validate(); errValidate != nil {
+		return errValidate
+	}
 	*cfg = Config(decoded)
 	cfg.SyncServerResponseCompression()
 	cfg.OAuthOnlyFields = nil
@@ -993,6 +996,9 @@ func ValidateV8Config(data []byte) error {
 		return errValidate
 	}
 	if errValidate := (*Config)(&cfg).ValidateAccountPools(); errValidate != nil {
+		return errValidate
+	}
+	if errValidate := cfg.Routing.QuotaShadow.Validate(); errValidate != nil {
 		return errValidate
 	}
 	return (*Config)(&cfg).ValidateUserAgents()

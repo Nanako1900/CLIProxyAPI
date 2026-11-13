@@ -2,6 +2,13 @@ import { apiClient } from './client';
 import { isRecord } from '@/utils/helpers';
 
 export type Pool = { id: string; name: string; enabled: boolean; strategy?: string };
+export type PoolRuntime = {
+  state: 'disabled' | 'active' | 'restart_required' | 'home_unsupported';
+  configured_enabled: boolean;
+  startup_enabled: boolean;
+  restart_required: boolean;
+  home_enabled: boolean;
+};
 export type PoolClient = {
   id: string;
   'api-key'?: string;
@@ -181,6 +188,12 @@ export function accountPoolsConnection() {
     if (revision !== apiClient.getConnectionRevision()) throw new Error('connection_changed');
   };
   return {
+    async runtime(): Promise<PoolRuntime> {
+      assertCurrent();
+      const runtime = await client.get<PoolRuntime>('/account-pools/status');
+      assertCurrent();
+      return runtime;
+    },
     async load(): Promise<PoolSnapshot> {
       assertCurrent();
       const [response, inventory] = await Promise.all([
