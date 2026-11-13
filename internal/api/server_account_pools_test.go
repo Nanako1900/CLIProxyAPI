@@ -15,6 +15,7 @@ import (
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/pool"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
 func testServerPoolConfig() *config.Config {
@@ -50,6 +51,82 @@ func TestAccountPoolRoutesFailClosed(t *testing.T) {
 				req.Header.Set("Authorization", "Bearer "+tc.key)
 			}
 			req.Header.Set("X-Pool-ID", "premium")
+			rec := httptest.NewRecorder()
+			server.engine.ServeHTTP(rec, req)
+			if rec.Code != tc.status {
+				t.Fatalf("status=%d want=%d body=%s", rec.Code, tc.status, rec.Body.String())
+			}
+		})
+	}
+}
+
+type poolResourcePlugin struct{}
+
+func (p poolResourcePlugin) RegisterManagement(context.Context, pluginapi.ManagementRegistrationRequest) (pluginapi.ManagementRegistrationResponse, error) {
+	return pluginapi.ManagementRegistrationResponse{
+		Routes: []pluginapi.ManagementRoute{
+			{Method: http.MethodGet, Path: "/legacy.html", Menu: "Legacy page", Handler: p},
+		},
+		Resources: []pluginapi.ResourceRoute{
+			{Path: "/index.html", Menu: "Plugin page", Handler: p},
+			{Path: "/assets/app.js", Handler: p},
+			{Path: "/assets/style.css", Handler: p},
+		},
+	}, nil
+}
+
+func (poolResourcePlugin) HandleManagement(_ context.Context, req pluginapi.ManagementRequest) (pluginapi.ManagementResponse, error) {
+	return pluginapi.ManagementResponse{Body: []byte(req.Path)}, nil
+}
+
+func TestAccountPoolPluginResourcesRemainPublic(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "pool-management-key")
+	host := pluginhost.New()
+	t.Cleanup(host.ShutdownAll)
+	for _, id := range []string{"first-ui", "second-ui"} {
+		host.RegisterPluginForTest(id, pluginapi.Plugin{
+			Capabilities: pluginapi.Capabilities{ManagementAPI: poolResourcePlugin{}},
+		})
+	}
+	server := newTestServerWithConfig(t, testServerPoolConfig(), WithPluginHost(host))
+	for _, id := range []string{"first-ui", "second-ui"} {
+		for _, resource := range []string{"index.html", "legacy.html", "assets/app.js", "assets/style.css"} {
+			path := "/v0/resource/plugins/" + id + "/" + resource
+			for _, key := range []string{"", "invalid-api-key"} {
+				t.Run(path+"/"+key, func(t *testing.T) {
+					req := httptest.NewRequest(http.MethodGet, path, nil)
+					if key != "" {
+						req.Header.Set("Authorization", "Bearer "+key)
+					}
+					rec := httptest.NewRecorder()
+					server.engine.ServeHTTP(rec, req)
+					if rec.Code != http.StatusOK || rec.Body.String() != path {
+						t.Fatalf("status=%d body=%s, want 200 and plugin resource", rec.Code, rec.Body.String())
+					}
+				})
+			}
+		}
+	}
+	for _, tc := range []struct {
+		method, path, key string
+		status            int
+	}{
+		{http.MethodGet, "/v0/resource/plugins/first-ui/missing.html", "", http.StatusNotFound},
+		{http.MethodGet, "/v0/resource/plugins/missing/index.html", "", http.StatusNotFound},
+		{http.MethodPost, "/v0/resource/plugins/first-ui/index.html", "", http.StatusNotFound},
+		{http.MethodGet, "/v0/resource/plugins-other/first-ui/index.html", "", http.StatusUnauthorized},
+		{http.MethodGet, "/pools/basic/v0/resource/plugins/first-ui/index.html", "pool-client-key", http.StatusNotImplemented},
+		{http.MethodGet, "/pools/basic/v1/models", "", http.StatusUnauthorized},
+		{http.MethodGet, "/v8/management/plugins", "", http.StatusUnauthorized},
+		{http.MethodGet, "/v8/management/plugins", "pool-client-key", http.StatusUnauthorized},
+		{http.MethodGet, "/v8/management/plugins", "pool-management-key", http.StatusOK},
+	} {
+		t.Run(tc.method+tc.path+"/"+tc.key, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req.RemoteAddr = "127.0.0.1:12345"
+			if tc.key != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.key)
+			}
 			rec := httptest.NewRecorder()
 			server.engine.ServeHTTP(rec, req)
 			if rec.Code != tc.status {
