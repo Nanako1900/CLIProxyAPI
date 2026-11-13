@@ -15,6 +15,7 @@ import (
 	internallogging "github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/pool"
 )
 
 // Quota shadow mode evaluates a quota-aware scheduling policy next to every real
@@ -31,7 +32,7 @@ const (
 
 // quotaShadowSettingsFromConfig normalizes the shadow configuration. ok is false when disabled.
 func quotaShadowSettingsFromConfig(cfg *internalconfig.Config) (quotaShadowSettings, bool) {
-	if cfg == nil || !cfg.Routing.QuotaShadow.Enabled {
+	if cfg == nil || !cfg.Routing.QuotaShadow.Enabled || cfg.Routing.QuotaShadow.Validate() != nil {
 		return quotaShadowSettings{}, false
 	}
 	shadow := cfg.Routing.QuotaShadow
@@ -42,6 +43,9 @@ func quotaShadowSettingsFromConfig(cfg *internalconfig.Config) (quotaShadowSetti
 	}
 	if settings.path == "" {
 		settings.path = filepath.Join(internallogging.ResolveLogDirectory(cfg), quotaShadowFileName)
+	}
+	if absolute, errAbsolute := filepath.Abs(settings.path); errAbsolute == nil {
+		settings.path = absolute
 	}
 	if settings.maxBytes <= 0 {
 		settings.maxBytes = quotaShadowDefaultMaxBytes
@@ -55,7 +59,8 @@ func quotaShadowSettingsFromConfig(cfg *internalconfig.Config) (quotaShadowSetti
 // applyQuotaShadowConfig starts, updates, replaces, or stops the shadow recorder.
 // Settings other than the path are updated in place. A recorder replaced for a
 // new path drains in the background, so the config update (which runs under the
-// config mutex) never waits on file I/O, and the two recorders write different files.
+// config mutex) never waits on file I/O. Successors wait for their predecessor
+// before writing, including A -> B -> A path changes and disable/re-enable cycles.
 func (m *Manager) applyQuotaShadowConfig(cfg *internalconfig.Config) {
 	if m == nil {
 		return
@@ -76,7 +81,12 @@ func (m *Manager) applyQuotaShadowConfig(cfg *internalconfig.Config) {
 	}
 	var next *quotaShadowRecorder
 	if enabled {
-		next = newQuotaShadowRecorder(settings)
+		var predecessor <-chan struct{}
+		if m.quotaShadowLast != nil {
+			predecessor = m.quotaShadowLast.done
+		}
+		next = newQuotaShadowRecorderAfter(settings, predecessor)
+		m.quotaShadowLast = next
 	}
 	if previous := m.quotaShadow.Swap(next); previous != nil {
 		m.quotaShadowClosing.Add(1)
@@ -96,11 +106,15 @@ func (m *Manager) StopQuotaShadow() {
 	m.quotaShadowMu.Lock()
 	m.quotaShadowStopped = true
 	previous := m.quotaShadow.Swap(nil)
+	last := m.quotaShadowLast
 	m.quotaShadowMu.Unlock()
 	if previous != nil {
 		previous.close()
 	}
 	m.quotaShadowClosing.Wait()
+	if last != nil {
+		<-last.done
+	}
 }
 
 // quotaShadowCandidate is the lock-free snapshot of one selectable credential.
@@ -131,18 +145,19 @@ func (m *Manager) observeQuotaShadowSelection(ctx context.Context, providers []s
 		return
 	}
 	now := time.Now()
-	sessionHash := quotaShadowSessionHash(opts)
+	scope, _ := pool.FromContext(ctx)
+	sessionHash := quotaShadowSessionHash(ctx, opts)
 	attempt := len(tried)
 	providers = append([]string(nil), providers...)
 	if pickErr != nil || picked == nil {
-		errText := errorString(pickErr)
+		errorCode := "selection_failed"
 		status := statusCodeFromError(pickErr)
 		var retryAfter *time.Duration
 		if pickErr != nil {
 			retryAfter = retryAfterFromError(pickErr)
 		}
 		recorder.emit(func(dropped uint64) []byte {
-			return renderQuotaShadowSelectionError(now, providers, model, sessionHash, attempt, status, retryAfter, errText, dropped)
+			return renderQuotaShadowSelectionError(now, providers, model, sessionHash, scope.ID, attempt, status, retryAfter, errorCode, dropped)
 		})
 		return
 	}
@@ -153,7 +168,7 @@ func (m *Manager) observeQuotaShadowSelection(ctx context.Context, providers []s
 	recorder.emit(func(dropped uint64) []byte {
 		evaluations := evaluateQuotaShadowCandidates(candidates, now, softLimit)
 		shadowID, reason := pickQuotaShadow(evaluations)
-		return renderQuotaShadowSelection(now, providers, model, sessionHash, attempt, actualID, actualProvider, shadowID, reason, evaluations, dropped)
+		return renderQuotaShadowSelection(now, providers, model, sessionHash, scope.ID, attempt, actualID, actualProvider, shadowID, reason, evaluations, dropped)
 	})
 }
 
@@ -170,6 +185,7 @@ func (m *Manager) quotaShadowCandidates(ctx context.Context, providers []string,
 		return nil
 	}
 	eligibility := authSelectionEligibilityForRequest(ctx, opts)
+	pinned := pinnedAuthIDFromMetadata(opts.Metadata)
 	modelKey := canonicalModelKey(model)
 	registryRef := registry.GetGlobalRegistry()
 
@@ -177,7 +193,7 @@ func (m *Manager) quotaShadowCandidates(ctx context.Context, providers []string,
 	defer m.mu.RUnlock()
 	pool := make([]*Auth, 0, len(m.auths))
 	for _, candidate := range m.auths {
-		if candidate == nil || candidate.Disabled {
+		if candidate == nil || candidate.Disabled || (pinned != "" && candidate.ID != pinned) {
 			continue
 		}
 		if _, used := tried[candidate.ID]; used {
@@ -321,7 +337,10 @@ func quotaShadowLess(a, b quotaShadowEvaluation) (bool, string) {
 }
 
 func compareDescending(a, b float64) (decided bool, less bool) {
-	if math.Abs(a-b) < quotaShadowFloatEpsilon {
+	// Quantized buckets form a strict order; pairwise epsilon ties are non-transitive.
+	a = math.Floor(a/quotaShadowFloatEpsilon + 1e-9)
+	b = math.Floor(b/quotaShadowFloatEpsilon + 1e-9)
+	if a == b {
 		return false, false
 	}
 	return true, a > b
@@ -329,9 +348,9 @@ func compareDescending(a, b float64) (decided bool, less bool) {
 
 // observeQuotaShadowResult records the outcome and the latest quota windows of
 // one execution so window semantics and consumption can be analyzed offline.
-func (m *Manager) observeQuotaShadowResult(result Result, auth *Auth, now time.Time) {
+func (m *Manager) observeQuotaShadowResult(ctx context.Context, result Result, auth *Auth, now time.Time) {
 	recorder := m.quotaShadow.Load()
-	if recorder == nil || auth == nil {
+	if recorder == nil || auth == nil || m.HomeEnabled() {
 		return
 	}
 	provider := canonicalSchedulingProvider(executorKeyFromAuth(auth))
@@ -347,6 +366,7 @@ func (m *Manager) observeQuotaShadowResult(result Result, auth *Auth, now time.T
 		}
 	}
 	authID := auth.ID
+	scope, _ := pool.FromContext(ctx)
 	model := result.Model
 	routeModel := result.RouteModel
 	success := result.Success
@@ -354,7 +374,7 @@ func (m *Manager) observeQuotaShadowResult(result Result, auth *Auth, now time.T
 	status := statusCodeFromResult(result.Error)
 	var errorCode string
 	if result.Error != nil {
-		errorCode = result.Error.Code
+		errorCode = "execution_failed"
 	}
 	var retryAfter *time.Duration
 	if result.RetryAfter != nil {
@@ -364,6 +384,7 @@ func (m *Manager) observeQuotaShadowResult(result Result, auth *Auth, now time.T
 	recorder.emit(func(dropped uint64) []byte {
 		doc := ojson.NewDoc([]byte("{}"))
 		_ = doc.Set("type", "observation")
+		_ = doc.Set("pool_id", scope.ID)
 		_ = doc.Set("ts_ms", now.UnixMilli())
 		_ = doc.Set("auth", authID)
 		_ = doc.Set("provider", provider)
@@ -395,9 +416,10 @@ func (m *Manager) observeQuotaShadowResult(result Result, auth *Auth, now time.T
 	})
 }
 
-func renderQuotaShadowSelection(now time.Time, providers []string, model, sessionHash string, attempt int, actualID, actualProvider, shadowID, reason string, evaluations []quotaShadowEvaluation, dropped uint64) []byte {
+func renderQuotaShadowSelection(now time.Time, providers []string, model, sessionHash, poolID string, attempt int, actualID, actualProvider, shadowID, reason string, evaluations []quotaShadowEvaluation, dropped uint64) []byte {
 	doc := ojson.NewDoc([]byte("{}"))
 	_ = doc.Set("type", "selection")
+	_ = doc.Set("pool_id", poolID)
 	_ = doc.Set("ts_ms", now.UnixMilli())
 	_ = doc.Set("model", model)
 	_ = doc.Set("providers", providers)
@@ -496,9 +518,10 @@ func renderQuotaSignals(signals map[string]string) []byte {
 	return doc.Bytes()
 }
 
-func renderQuotaShadowSelectionError(now time.Time, providers []string, model, sessionHash string, attempt, status int, retryAfter *time.Duration, errText string, dropped uint64) []byte {
+func renderQuotaShadowSelectionError(now time.Time, providers []string, model, sessionHash, poolID string, attempt, status int, retryAfter *time.Duration, errorCode string, dropped uint64) []byte {
 	doc := ojson.NewDoc([]byte("{}"))
 	_ = doc.Set("type", "selection_error")
+	_ = doc.Set("pool_id", poolID)
 	_ = doc.Set("ts_ms", now.UnixMilli())
 	_ = doc.Set("model", model)
 	_ = doc.Set("providers", providers)
@@ -512,16 +535,14 @@ func renderQuotaShadowSelectionError(now time.Time, providers []string, model, s
 	if retryAfter != nil {
 		_ = doc.Set("retry_after_ms", retryAfter.Milliseconds())
 	}
-	if errText != "" {
-		_ = doc.Set("error", truncateString(errText, 256))
-	}
+	_ = doc.Set("error_code", errorCode)
 	_ = doc.Set("dropped", dropped)
 	return doc.Bytes()
 }
 
 // quotaShadowSessionHash returns a short stable digest of the request session so
 // cold bindings can be identified offline without recording raw identifiers.
-func quotaShadowSessionHash(opts cliproxyexecutor.Options) string {
+func quotaShadowSessionHash(ctx context.Context, opts cliproxyexecutor.Options) string {
 	sessionID := ""
 	if opts.Metadata != nil {
 		if raw, ok := opts.Metadata[cliproxyexecutor.CanonicalSessionIDMetadataKey].(string); ok {
@@ -534,7 +555,7 @@ func quotaShadowSessionHash(opts cliproxyexecutor.Options) string {
 	if sessionID == "" {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(sessionID))
+	sum := sha256.Sum256([]byte(pool.Namespace(ctx, sessionID)))
 	return hex.EncodeToString(sum[:8])
 }
 

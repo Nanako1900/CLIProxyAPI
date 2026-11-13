@@ -10,7 +10,7 @@ diff --git a/src/components/layout/MainLayout.tsx b/src/components/layout/MainLa
  function useMenuDismiss(
    open: boolean,
    menuRef: RefObject<HTMLDivElement | null>,
-@@ -674,6 +674,12 @@
+@@ -680,6 +680,12 @@
        id: 'control',
        labelKey: 'nav_groups.control',
        items: [
@@ -26,22 +26,22 @@ diff --git a/src/components/layout/MainLayout.tsx b/src/components/layout/MainLa
 diff --git a/src/router/MainRoutes.tsx b/src/router/MainRoutes.tsx
 --- a/src/router/MainRoutes.tsx
 +++ b/src/router/MainRoutes.tsx
-@@ -6,6 +6,7 @@
- import { AuthFilesOAuthModelAliasEditPage } from '@/pages/AuthFilesOAuthModelAliasEditPage';
+@@ -7,6 +7,7 @@
  import { OAuthPage } from '@/features/oauth/OAuthPage';
  import { QuotaPage } from '@/features/quota/QuotaPage';
+ import { QuotaShadowPage } from '@/features/quotaShadow/QuotaShadowPage';
 +import { UserAgentsPage } from '@/features/userAgents/UserAgentsPage';
  import { AccountPoolsPage } from '@/features/accountPools/AccountPoolsPage';
  import { RoutingPage } from '@/features/routing/RoutingPage';
  import { PluginResourcePage } from '@/features/plugins/PluginResourcePage';
-@@ -30,6 +31,7 @@
+@@ -31,6 +32,7 @@
    { path: '/auth-files/oauth-model-alias', element: <AuthFilesOAuthModelAliasEditPage /> },
    { path: '/oauth', element: <OAuthPage /> },
    { path: '/routing', element: <RoutingPage /> },
 +  { path: '/user-agents', element: <UserAgentsPage /> },
    { path: '/account-pools', element: <AccountPoolsPage /> },
+   { path: '/quota-shadow', element: <QuotaShadowPage /> },
    { path: '/quota', element: <QuotaPage /> },
-   ...(supportsPlugin
 diff --git a/src/features/config/components/sections/SectionAdvanced.tsx b/src/features/config/components/sections/SectionAdvanced.tsx
 --- a/src/features/config/components/sections/SectionAdvanced.tsx
 +++ b/src/features/config/components/sections/SectionAdvanced.tsx
@@ -269,10 +269,10 @@ diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
      "claude_scope": "Applies to Claude OAuth and API keys. A credential’s custom User-Agent takes priority.",
      "codex_scope": "Applies to Codex OAuth. Codex API keys use their own custom User-Agent header.",
      "select": "Select {{provider}} User-Agent",
-@@ -2595,5 +2595,180 @@
-     "invalid_client": "Every identity needs a unique ID and a key or provider. Client keys cannot duplicate another client or an existing ordinary key.",
-     "remove_client": "Remove identity from draft",
-     "source_plugin": "Plugin managed"
+@@ -2695,5 +2695,180 @@
+     "reason_long_remaining": "Long-window remaining",
+     "reason_id": "Stable identifier",
+     "reason_unknown": "Other reason"
 +  },
 +  "ua_panel": {
 +    "title": "UA control panel",
@@ -462,10 +462,10 @@ diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
      "claude_scope": "适用于 Claude OAuth 和 API Key。凭据单独设置的 User-Agent 优先。",
      "codex_scope": "适用于 Codex OAuth。Codex API Key 请在对应凭据的自定义请求头中设置 User-Agent。",
      "select": "选择 {{provider}} User-Agent",
-@@ -2593,5 +2593,180 @@
-     "invalid_client": "每个身份需要唯一 ID 及密钥或认证提供方。调用密钥不能与其他身份或现有普通密钥重复。",
-     "remove_client": "从草稿移除此身份",
-     "source_plugin": "插件托管"
+@@ -2693,5 +2693,180 @@
+     "reason_long_remaining": "长窗口剩余额度",
+     "reason_id": "稳定标识排序",
+     "reason_unknown": "其他原因"
 +  },
 +  "ua_panel": {
 +    "title": "UA 控制面板",
@@ -655,10 +655,10 @@ diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
      "claude_scope": "適用於 Claude OAuth 與 API Key。憑證個別設定的 User-Agent 優先。",
      "codex_scope": "適用於 Codex OAuth。Codex API Key 請在對應憑證的自訂標頭設定 User-Agent。",
      "select": "選擇 {{provider}} User-Agent",
-@@ -2621,5 +2621,180 @@
-     "unscoped": "不帶號池前綴的請求",
-     "unsupported": "後端未提供號池管理接口，或賬號已不存在。請部署更新後的 CPA 後端並刷新。",
-     "source_plugin": "外掛管理"
+@@ -2721,5 +2721,180 @@
+     "reason_long_remaining": "長窗口剩餘額度",
+     "reason_id": "穩定識別碼排序",
+     "reason_unknown": "其他原因"
 +  },
 +  "ua_panel": {
 +    "after": "新值",
@@ -848,10 +848,10 @@ diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
      "claude_scope": "Claude OAuth와 API 키에 적용됩니다. 자격 증명별 User-Agent가 우선합니다.",
      "codex_scope": "Codex OAuth에 적용됩니다. Codex API 키는 해당 자격 증명의 사용자 지정 User-Agent 헤더를 사용합니다.",
      "select": "{{provider}} User-Agent 선택",
-@@ -2595,5 +2595,180 @@
-     "invalid_grants": "권한은 정의된 풀을 참조해야 합니다. 와일드카드는 단독으로 사용하세요.",
-     "invalid_client": "고유 ID 및 키 또는 제공자가 필요합니다. 클라이언트 키는 다른 키와 중복될 수 없습니다.",
-     "source_plugin": "플러그인 관리"
+@@ -2695,5 +2695,180 @@
+     "outcome_counts": "성공 {{success}} · 실패 {{failed}} · 선택 오류 {{errors}}",
+     "loss_counts": "대기열 초과 {{dropped}} · 파일 오류 {{io}} · 생성 오류 {{render}}",
+     "recent_hint": "메모리의 최근 {{limit}}개 이벤트를 최신순으로 표시합니다. 필터는 표에만 적용되며 통계는 전체 세션 기준입니다. 과거 JSONL 파일은 읽지 않습니다. 파일 기록에 실패한 이벤트도 표시될 수 있습니다."
 +  },
 +  "ua_panel": {
 +    "title": "UA 제어판",
@@ -1041,10 +1041,10 @@ diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
      "claude_scope": "Для Claude OAuth и API-ключей. User-Agent отдельной учётной записи имеет приоритет.",
      "codex_scope": "Для Codex OAuth. Для API-ключей Codex задайте User-Agent в заголовках учётной записи.",
      "select": "Выбрать User-Agent {{provider}}",
-@@ -2589,5 +2589,180 @@
-     "invalid_grants": "Права должны ссылаться на существующие пулы. Звёздочка используется отдельно.",
-     "invalid_client": "Нужны уникальный ID и ключ или провайдер. Ключи клиентов не должны дублировать другие ключи.",
-     "source_plugin": "Управляется плагином"
+@@ -2689,5 +2689,180 @@
+     "outcome_counts": "Успех {{success}} · Ошибка {{failed}} · Ошибки выбора {{errors}}",
+     "loss_counts": "Очередь полна {{dropped}} · Ошибки файла {{io}} · Ошибки формирования {{render}}",
+     "recent_hint": "Последние {{limit}} событий в памяти, новые сверху. Фильтры влияют только на таблицу; итоги охватывают весь сеанс. История JSONL не загружается. Событие может отображаться даже при ошибке записи файла."
 +  },
 +  "ua_panel": {
 +    "title": "Панель UA",
@@ -1234,10 +1234,10 @@ diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
      "claude_scope": "Claude OAuth ve API anahtarlarına uygulanır. Kimlik bilgisine özel User-Agent önceliklidir.",
      "codex_scope": "Codex OAuth için geçerlidir. Codex API anahtarlarında ilgili kimlik bilgisinin özel User-Agent başlığını ayarlayın.",
      "select": "{{provider}} User-Agent seç",
-@@ -2595,5 +2595,180 @@
-     "invalid_grants": "İzinler mevcut havuzları göstermelidir. Joker tek başına kullanılmalıdır.",
-     "invalid_client": "Benzersiz kimlik ve anahtar veya sağlayıcı gerekir. İstemci anahtarları diğer anahtarlarla aynı olamaz.",
-     "source_plugin": "Eklenti tarafından yönetiliyor"
+@@ -2695,5 +2695,180 @@
+     "outcome_counts": "Başarılı {{success}} · Başarısız {{failed}} · Seçim hataları {{errors}}",
+     "loss_counts": "Kuyruk dolu {{dropped}} · Dosya hataları {{io}} · Oluşturma hataları {{render}}",
+     "recent_hint": "Bellekteki son {{limit}} olay, en yeni önce gösterilir. Filtreler yalnızca tabloyu etkiler; toplamlar tüm oturuma aittir. Geçmiş JSONL dosyaları okunmaz. Dosyaya yazılamayan olaylar da burada görünebilir."
 +  },
 +  "ua_panel": {
 +    "title": "UA kontrol paneli",
@@ -1427,10 +1427,10 @@ diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
      "claude_scope": "Áp dụng cho Claude OAuth và khóa API. User-Agent riêng của thông tin xác thực được ưu tiên.",
      "codex_scope": "Áp dụng cho Codex OAuth. Với khóa API Codex, đặt User-Agent trong header tùy chỉnh của khóa.",
      "select": "Chọn User-Agent {{provider}}",
-@@ -2601,5 +2601,180 @@
-     "invalid_grants": "Quyền phải trỏ tới nhóm đã có. Ký tự đại diện phải dùng riêng.",
-     "invalid_client": "Cần ID duy nhất và khóa hoặc nhà cung cấp. Khóa máy khách không được trùng khóa khác.",
-     "source_plugin": "Do plugin quản lý"
+@@ -2701,5 +2701,180 @@
+     "outcome_counts": "Thành công {{success}} · Thất bại {{failed}} · Lỗi lựa chọn {{errors}}",
+     "loss_counts": "Hàng đợi đầy {{dropped}} · Lỗi tệp {{io}} · Lỗi tạo bản ghi {{render}}",
+     "recent_hint": "{{limit}} sự kiện gần nhất trong bộ nhớ, mới nhất trước. Bộ lọc chỉ áp dụng cho bảng; tổng số tính cả phiên. Không tải lịch sử JSONL. Sự kiện có thể xuất hiện dù ghi tệp thất bại."
 +  },
 +  "ua_panel": {
 +    "title": "Bảng điều khiển UA",

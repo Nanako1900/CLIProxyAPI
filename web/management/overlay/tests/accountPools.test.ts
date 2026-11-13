@@ -18,6 +18,7 @@ import {
   GrantPicker,
   PoolControls,
 } from '../src/features/accountPools/PoolControls';
+import { PoolRuntimeBanner } from '../src/features/accountPools/PoolRuntimeBanner';
 import en from '../src/i18n/locales/en.json';
 import zh from '../src/i18n/locales/zh-CN.json';
 import tw from '../src/i18n/locales/zh-TW.json';
@@ -61,6 +62,56 @@ const config = {
 };
 
 afterEach(() => mock.restore());
+
+test('runtime status uses the originating authenticated connection and rejects stale responses', async () => {
+  let finish!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const api = transport(async (request) => {
+    expect(request.url).toBe('/account-pools/status');
+    expect(request.headers.Authorization).toBe('Bearer test-management-key');
+    await ready;
+    return {
+      data: { state: 'restart_required' },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config: request,
+    };
+  });
+  const pending = api.runtime();
+  await Promise.resolve();
+  apiClient.setConfig({ apiBase: 'https://other.invalid', managementKey: 'different' });
+  finish();
+  await expect(pending).rejects.toThrow('connection_changed');
+});
+
+test.each(['en', 'zh-CN'])(
+  'runtime banner distinguishes saved configuration from active isolation (%s)',
+  async (language) => {
+    const previous = i18n.language;
+    try {
+      await i18n.changeLanguage(language);
+      const runtime = {
+        state: 'restart_required' as const,
+        configured_enabled: true,
+        startup_enabled: false,
+        restart_required: true,
+        home_enabled: false,
+      };
+      const render = (savedEnabled: boolean, failed = false) =>
+        renderToStaticMarkup(createElement(PoolRuntimeBanner, { runtime, savedEnabled, failed }));
+      expect(render(true)).toContain('pool_restart_required');
+      expect(render(true)).toContain('role="alert"');
+      expect(render(true)).toContain('Coolify');
+      expect(render(false)).toContain(i18n.t('account_pools.runtime_pending'));
+      expect(render(true, true)).toContain(i18n.t('account_pools.runtime_unknown'));
+    } finally {
+      await i18n.changeLanguage(previous);
+    }
+  }
+);
 
 describe('account pool configuration', () => {
   test('defaults to deny, preserves grants, and never includes unrelated config in settings patch', () => {

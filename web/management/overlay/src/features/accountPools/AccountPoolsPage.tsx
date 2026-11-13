@@ -15,9 +15,11 @@ import {
   type PoolDraft,
   type PoolSnapshot,
   type PoolMember,
+  type PoolRuntime,
   type ConfigPoolMember,
 } from '@/services/api/accountPools';
 import { ClientControls, PoolControls } from './PoolControls';
+import { PoolRuntimeBanner } from './PoolRuntimeBanner';
 import styles from './AccountPoolsPage.module.scss';
 
 export function AccountPoolsPage() {
@@ -43,6 +45,8 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [review, setReview] = useState(false);
+  const [runtime, setRuntime] = useState<PoolRuntime | null>(null);
+  const [runtimeFailed, setRuntimeFailed] = useState(false);
   const [filter, setFilter] = useState('*');
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(40);
@@ -102,6 +106,16 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
     const request = ++generation.current;
     setLoading(true);
     setError('');
+    setRuntime(null);
+    setRuntimeFailed(false);
+    void connection
+      .runtime()
+      .then((next) => {
+        if (alive.current && request === generation.current) setRuntime(next);
+      })
+      .catch(() => {
+        if (alive.current && request === generation.current) setRuntimeFailed(true);
+      });
     try {
       const next = await connection.load();
       if (!alive.current || request !== generation.current) return;
@@ -222,6 +236,13 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
         </Button>
       </header>
       <p className={styles.info}>{t('account_pools.scope_hint')}</p>
+      {connected && (
+        <PoolRuntimeBanner
+          runtime={runtime}
+          failed={runtimeFailed}
+          savedEnabled={snapshot?.draft.settings.enabled}
+        />
+      )}
       {error && (
         <div role="alert" className="error-box">
           {t(`account_pools.${error}`)}

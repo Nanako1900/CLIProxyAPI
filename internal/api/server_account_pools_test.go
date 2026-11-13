@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
@@ -149,6 +150,9 @@ func TestAccountPoolHTTPDispatchStaysInsidePool(t *testing.T) {
 	cfg.AccountPools.Unscoped = config.PoolUnscopedConfig{Mode: "default", PoolID: "basic"}
 	server := newTestServerWithConfig(t, cfg)
 	manager := server.handlers.AuthManager
+	// The production builder always attaches a host, even when no plugin
+	// scheduler is installed. A non-nil host must not reject pooled execution.
+	manager.SetPluginScheduler(pluginhost.New())
 	e := &poolHTTPExecutor{}
 	manager.RegisterExecutor(e)
 	for _, item := range []struct{ id, pool string }{{"http-basic", "basic"}, {"http-premium", "premium"}} {
@@ -158,7 +162,7 @@ func TestAccountPoolHTTPDispatchStaysInsidePool(t *testing.T) {
 		registry.GetGlobalRegistry().RegisterClient(item.id, e.Identifier(), []*registry.ModelInfo{{ID: "pool-http-model", Object: "model"}})
 		t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(item.id) })
 	}
-	for _, path := range []string{"/pools/basic/v1/chat/completions", "/v1/chat/completions"} {
+	for _, path := range []string{"/pools/basic/v1/chat/completions", "/v1/chat/completions", "/pools/basic/v1/messages?beta=true", "/v1/messages?beta=true"} {
 		for _, stream := range []bool{false, true} {
 			req := httptest.NewRequest("POST", path, strings.NewReader(fmt.Sprintf(`{"model":"pool-http-model","pool_id":"premium","messages":[{"role":"user","content":"test"}],"stream":%t}`, stream)))
 			req.Header.Set("Authorization", "Bearer pool-client-key")
@@ -179,7 +183,7 @@ func TestAccountPoolHTTPDispatchStaysInsidePool(t *testing.T) {
 	if autoRec.Code != 200 {
 		t.Fatalf("scoped auto failed: %d %s", autoRec.Code, autoRec.Body.String())
 	}
-	if len(e.calls) != 5 {
+	if len(e.calls) != 9 {
 		t.Fatalf("calls=%v", e.calls)
 	}
 	for i, id := range e.calls {

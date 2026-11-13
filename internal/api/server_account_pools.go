@@ -26,7 +26,16 @@ func (s *Server) accountPoolMiddleware() gin.HandlerFunc {
 			return
 		}
 		reject := func(status int, code string) {
-			c.AbortWithStatusJSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "code": code, "message": code}})
+			message := code
+			switch code {
+			case "pool_restart_required":
+				message = "Account pool isolation changed since startup. Restart the CPA process or container to apply it; configuration reload is insufficient."
+			case "pool_protocol_unsupported":
+				message = "Account pools are not supported in Home mode."
+			case "pool_disabled":
+				message = "This account pool is disabled. Enable it in Account pools settings."
+			}
+			c.AbortWithStatusJSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "code": code, "message": message}})
 		}
 		if cfg == nil || s.accountPoolsEnabled != cfg.AccountPools.Enabled {
 			reject(503, "pool_restart_required")
@@ -83,6 +92,32 @@ func (s *Server) accountPoolMiddleware() gin.HandlerFunc {
 
 		c.Request = c.Request.WithContext(pool.WithScope(c.Request.Context(), pool.Scope{ID: poolID, Principal: identity.Principal, Provider: identity.Provider}))
 	}
+}
+
+// accountPoolStatus distinguishes saved configuration from the startup safety gate.
+// Keep this behind management authentication; no inference keys are exposed.
+func (s *Server) accountPoolStatus(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	cfg := s.getConfig()
+	if cfg == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "pool_state_unavailable"})
+		return
+	}
+	restart := s.accountPoolsEnabled != cfg.AccountPools.Enabled
+	state := "disabled"
+	switch {
+	case restart:
+		state = "restart_required"
+	case cfg.AccountPools.Enabled && cfg.Home.Enabled:
+		state = "home_unsupported"
+	case cfg.AccountPools.Enabled:
+		state = "active"
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"state": state, "startup_enabled": s.accountPoolsEnabled,
+		"configured_enabled": cfg.AccountPools.Enabled, "restart_required": restart,
+		"home_enabled": cfg.Home.Enabled,
+	})
 }
 
 func poolControlPath(path string) bool {
