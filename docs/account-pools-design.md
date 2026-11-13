@@ -1,9 +1,9 @@
 # Account pool isolation design
 
-Status: target implementation specification. The local HTTP implementation and
+Status: target implementation specification. The local HTTP implementation, web panel, and
 its explicit limitations are documented in [Account pools](account-pools.md).
 This document also specifies later work (Home protocol, stateful adapters,
-management UI, batch membership operations, durable revision/audit records, and
+batch membership operations, durable revision/audit records, and
 pool accounting dashboards); those contracts are not all implemented by this PR.
 The full production acceptance matrix below remains a release gate for that wider
 scope. Do not infer implementation status from a proposed API in this document.

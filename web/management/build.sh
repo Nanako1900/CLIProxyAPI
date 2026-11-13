@@ -30,6 +30,7 @@ cd "$source_dir"
 git apply "$extension_dir/native-settings.patch"
 git apply "$extension_dir/oauth-socks.patch"
 git apply "$extension_dir/kiro-json-import.patch"
+git apply "$extension_dir/account-pools.patch"
 cp -R "$extension_dir/overlay/." .
 bun install --frozen-lockfile
 bun run verify

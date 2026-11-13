@@ -1,0 +1,118 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 32px;
+}
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.heading h1,
+.heading h2 {
+  margin: 0;
+}
+.heading p {
+  color: var(--text-secondary);
+  max-width: 760px;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.poolGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 16px;
+}
+.info {
+  padding: 14px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  margin: 0;
+  line-height: 1.6;
+}
+.urls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.urls code {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.grants {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+}
+.grants label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.grants small {
+  width: 100%;
+  color: var(--text-secondary);
+}
+.client {
+  display: grid;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.saveBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+}
+.filters {
+  display: grid;
+  align-items: end;
+  gap: 16px;
+  grid-template-columns: 1fr 1fr;
+}
+.member {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 16px;
+}
+.member > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.member small {
+  display: block;
+  color: var(--text-secondary);
+  margin-top: 6px;
+}
+.member .pending {
+  color: var(--warning-color, var(--text-primary));
+}
+@media (max-width: 600px) {
+  .filters {
+    grid-template-columns: 1fr;
+  }
+  .member {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
