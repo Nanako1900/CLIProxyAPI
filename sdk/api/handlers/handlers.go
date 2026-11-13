@@ -23,6 +23,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/pool"
 	coresession "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/session"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
@@ -306,6 +307,10 @@ func requestExecutionMetadata(ctx context.Context) map[string]any {
 	if key != "" {
 		meta[idempotencyKeyMetadataKey] = key
 	}
+	if scope, scoped := pool.FromContext(ctx); scoped {
+		requestPath = strings.TrimPrefix(requestPath, "/pools/:pool_id")
+		requestPath = strings.TrimPrefix(requestPath, "/pools/"+scope.ID)
+	}
 	if requestPath != "" {
 		meta[coreexecutor.RequestPathMetadataKey] = requestPath
 	}
@@ -390,7 +395,14 @@ func requestCallerScope(ginCtx *gin.Context) string {
 	if !exists || value == nil {
 		return ""
 	}
-	return coresession.CallerScope(fmt.Sprint(value))
+	scope := coresession.CallerScope(fmt.Sprint(value))
+	if ginCtx.Request == nil {
+		return scope
+	}
+	if _, scoped := pool.FromContext(ginCtx.Request.Context()); scoped {
+		return pool.Namespace(ginCtx.Request.Context(), "caller")
+	}
+	return scope
 }
 
 func addCallerScopeMetadata(meta map[string]any, callerScope string) {
@@ -634,6 +646,7 @@ func (h *BaseAPIHandler) GetContextWithCancel(handler interfaces.APIHandler, c *
 	}
 
 	if requestCtx != nil {
+		parentCtx = pool.Inherit(parentCtx, requestCtx)
 		parentCtx = httptransport.InheritDecorator(parentCtx, requestCtx)
 		parentCtx = coreusage.InheritRecorder(parentCtx, requestCtx)
 		parentCtx = logging.InheritDeferredCapture(parentCtx, requestCtx)

@@ -28,6 +28,9 @@ type VertexCompatKey struct {
 	// Prefix optionally namespaces model aliases for this credential (e.g., "teamA/vertex-pro").
 	Prefix string `yaml:"prefix,omitempty" json:"prefix,omitempty"`
 
+	// PoolID assigns this credential to one account pool.
+	PoolID string `yaml:"pool-id,omitempty" json:"pool-id,omitempty"`
+
 	// BaseURL optionally overrides the Vertex-compatible API endpoint.
 	// When it contains a "/publishers/" segment it is used as the full resource
 	// prefix (e.g. "https://aiplatform.googleapis.com/v1/projects/{p}/locations/{l}/publishers/google/models")

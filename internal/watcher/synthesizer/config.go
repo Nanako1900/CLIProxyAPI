@@ -173,6 +173,7 @@ func (s *ConfigSynthesizer) synthesizeGeminiKeyEntries(ctx *SynthesisContext, en
 			Provider:   provider,
 			Label:      label,
 			Prefix:     prefix,
+			PoolID:     entry.PoolID,
 			Status:     coreauth.StatusActive,
 			ProxyURL:   proxyURL,
 			Attributes: attrs,
@@ -250,6 +251,7 @@ func (s *ConfigSynthesizer) synthesizeClaudeKeys(ctx *SynthesisContext) []*corea
 			Provider:   "claude",
 			Label:      "claude-apikey",
 			Prefix:     prefix,
+			PoolID:     ck.PoolID,
 			Status:     coreauth.StatusActive,
 			ProxyURL:   proxyURL,
 			Attributes: attrs,
@@ -340,6 +342,7 @@ func (s *ConfigSynthesizer) synthesizeCodexStyleKeys(ctx *SynthesisContext, entr
 			Provider:            provider,
 			Label:               provider + "-apikey",
 			Prefix:              prefix,
+			PoolID:              entry.PoolID,
 			Status:              coreauth.StatusActive,
 			ProxyURL:            strings.TrimSpace(entry.ProxyURL),
 			Attributes:          attrs,
@@ -420,6 +423,7 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 				Provider:            internalProviderKey,
 				Label:               compat.Name,
 				Prefix:              prefix,
+				PoolID:              openAIAccountPool(compat, entry),
 				Status:              coreauth.StatusActive,
 				ProxyURL:            proxyURL,
 				Attributes:          attrs,
@@ -468,6 +472,7 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 				Provider:            internalProviderKey,
 				Label:               compat.Name,
 				Prefix:              prefix,
+				PoolID:              compat.PoolID,
 				Status:              coreauth.StatusActive,
 				Attributes:          attrs,
 				Metadata:            metadata,
@@ -541,6 +546,7 @@ func (s *ConfigSynthesizer) synthesizeVertexCompat(ctx *SynthesisContext) []*cor
 			Provider:   providerName,
 			Label:      "vertex-apikey",
 			Prefix:     prefix,
+			PoolID:     compat.PoolID,
 			Status:     coreauth.StatusActive,
 			ProxyURL:   proxyURL,
 			Attributes: attrs,
@@ -557,4 +563,11 @@ func (s *ConfigSynthesizer) synthesizeVertexCompat(ctx *SynthesisContext) []*cor
 		out = append(out, a)
 	}
 	return out
+}
+
+func openAIAccountPool(group *config.OpenAICompatibility, entry *config.OpenAICompatibilityAPIKey) string {
+	if entry != nil && entry.PoolID != nil {
+		return *entry.PoolID
+	}
+	return group.PoolID
 }

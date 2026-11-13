@@ -120,6 +120,10 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 	}
 	auth.EnsureIndex()
 	m.mu.Lock()
+	if m.poolActive[auth.ID] > 0 {
+		m.mu.Unlock()
+		return nil, &poolError{"credential_busy", 409}
+	}
 	if m.authEpochs == nil {
 		m.authEpochs = make(map[string]uint64)
 	}
@@ -137,17 +141,28 @@ func (m *Manager) Register(ctx context.Context, auth *Auth) (*Auth, error) {
 		auth.CredentialVersion = 1
 	}
 	auth.Generation = 1
+	if m.poolMoving == nil {
+		m.poolMoving = make(map[string]bool)
+	}
+	if existing := m.auths[auth.ID]; existing != nil && (existing.AccountPoolID() != "" || auth.AccountPoolID() != "") {
+		m.poolMoving[auth.ID] = true
+	}
 	aliasTableBeforeSave := m.oauthModelAlias.Load()
 	// Serialize this credential, but release the manager lock during store I/O.
 	// Persist failures stay non-fatal, but must not be silent: a restart would
 	// lose the credential that only exists in memory.
 	if errPersist := m.persistLocked(ctx, auth); errPersist != nil {
+		if auth.AccountPoolID() != "" || m.poolMoving[auth.ID] {
+			m.mu.Unlock()
+			return nil, fmt.Errorf("persist pool credential: %w", errPersist)
+		}
 		log.WithFields(log.Fields{"auth_id": auth.ID, "credential": auth.ID, "provider": auth.Provider}).Warnf("failed to persist registered auth %s (%s): %v", auth.Provider, auth.ID, errPersist)
 	}
 	if m.authEpochs[auth.ID] != auth.RegistrationEpoch {
 		m.mu.Unlock()
 		return nil, fmt.Errorf("auth %s changed registration during persistence", auth.ID)
 	}
+	delete(m.poolMoving, auth.ID)
 	if m.oauthModelAlias.Load() != aliasTableBeforeSave {
 		cooldownStateChanged = m.migrateAuthAliasModelStatesLocked(auth, nil, now, false) || cooldownStateChanged
 		if len(auth.ModelStates) > 0 {
@@ -364,6 +379,22 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 			NormalizeCredentialMetadata(auth.Metadata)
 		}
 	}
+	if mode == updateModeRefresh || mode == updateModePrepare {
+		auth.PoolID = existing.PoolID
+		if value, exists := existing.Metadata["pool_id"]; exists {
+			if auth.Metadata == nil {
+				auth.Metadata = make(map[string]any)
+			}
+			auth.Metadata["pool_id"] = value
+		} else {
+			delete(auth.Metadata, "pool_id")
+		}
+	}
+	membershipChanged := auth.AccountPoolID() != existing.AccountPoolID()
+	if membershipChanged && m.poolActive[auth.ID] > 0 {
+		m.mu.Unlock()
+		return nil, false, false, &poolError{"credential_busy", 409}
+	}
 	if auth.RegistrationEpoch != 0 && auth.RegistrationEpoch < m.authEpochs[auth.ID] {
 		m.mu.Unlock()
 		return nil, false, false, fmt.Errorf("update auth %s: stale registration epoch %d < %d", auth.ID, auth.RegistrationEpoch, m.authEpochs[auth.ID])
@@ -578,14 +609,21 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 	auth.EnsureIndex()
 	// Save before publication, including the transactional Meta mint path.
 	// Runtime-only changes made during I/O are merged below, never overwritten.
+	// Fence new admissions while storage commits a membership change.
+	if membershipChanged {
+		if m.poolMoving == nil {
+			m.poolMoving = make(map[string]bool)
+		}
+		m.poolMoving[auth.ID] = true
+	}
 	existingBeforeSave := existing.Clone()
 	refreshPatchBeforeSave := auth.CodexRefreshPatch
 	persistMetaMint := (mode == updateModePrepare || mode == updateModeRefresh) && strings.EqualFold(strings.TrimSpace(auth.Provider), "meta")
 	if errPersist := m.persistLocked(ctx, auth); errPersist != nil {
 		// A minted Meta key must reach the store before requests can use it.
-		if persistMetaMint {
+		if persistMetaMint || membershipChanged || m.poolMoving[auth.ID] {
 			m.mu.Unlock()
-			return nil, false, false, fmt.Errorf("persist meta auth: %w", errPersist)
+			return nil, false, false, fmt.Errorf("persist auth: %w", errPersist)
 		}
 		// Ordinary persistence failures remain non-fatal, but never silent.
 		log.WithFields(log.Fields{"auth_id": auth.ID, "credential": auth.ID, "provider": auth.Provider}).Warnf("failed to persist updated auth %s (%s): %v", auth.Provider, auth.ID, errPersist)
@@ -594,6 +632,7 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 		m.mu.Unlock()
 		return nil, false, false, fmt.Errorf("auth %s changed registration during persistence", auth.ID)
 	}
+	delete(m.poolMoving, auth.ID)
 	mergeAuthSaveDelta(auth, existingBeforeSave, existing, false)
 	if m.migrateAuthAliasModelStatesLocked(auth, nil, now, false) {
 		cooldownStateChanged = true
@@ -766,9 +805,10 @@ func (m *Manager) invalidateSessionAffinity(authID string) {
 	if m == nil || authID == "" {
 		return
 	}
-	sel := m.Selector()
-	if invalidator, ok := sel.(interface{ InvalidateAuth(string) }); ok && invalidator != nil {
-		invalidator.InvalidateAuth(authID)
+	for _, sel := range m.selectorsSnapshot() {
+		if invalidator, ok := sel.(interface{ InvalidateAuth(string) }); ok && invalidator != nil {
+			invalidator.InvalidateAuth(authID)
+		}
 	}
 }
 
@@ -776,15 +816,16 @@ func (m *Manager) forgetWeightedAuthUpTo(authID string, maxEpoch, maxGen uint64)
 	if m == nil || authID == "" {
 		return
 	}
-	sel := m.Selector()
-	if epochForgetter, ok := sel.(interface {
-		ForgetAuthUpTo(string, uint64, uint64)
-	}); ok && epochForgetter != nil {
-		epochForgetter.ForgetAuthUpTo(authID, maxEpoch, maxGen)
-		return
-	}
-	if forgetter, ok := sel.(interface{ ForgetAuth(string) }); ok && forgetter != nil {
-		forgetter.ForgetAuth(authID)
+	for _, sel := range m.selectorsSnapshot() {
+		if epochForgetter, ok := sel.(interface {
+			ForgetAuthUpTo(string, uint64, uint64)
+		}); ok && epochForgetter != nil {
+			epochForgetter.ForgetAuthUpTo(authID, maxEpoch, maxGen)
+			continue
+		}
+		if forgetter, ok := sel.(interface{ ForgetAuth(string) }); ok && forgetter != nil {
+			forgetter.ForgetAuth(authID)
+		}
 	}
 }
 
@@ -811,6 +852,11 @@ func (m *Manager) Load(ctx context.Context) error {
 		return err
 	}
 	m.mu.Lock()
+	if len(m.poolActive) != 0 {
+		m.mu.Unlock()
+		return &poolError{"credential_busy", 409}
+	}
+	m.poolMoving = nil
 	now := time.Now()
 	previousAuths := m.auths
 	m.auths = make(map[string]*Auth, len(items))

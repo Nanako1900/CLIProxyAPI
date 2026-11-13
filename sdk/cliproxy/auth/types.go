@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/MoeForge/moego/base64"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/MoeForge/moego/base64"
 	"github.com/gin-gonic/gin"
 	baseauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codex"
@@ -51,6 +51,8 @@ func GetRequestInfo(ctx context.Context) *RequestInfo {
 
 // Auth encapsulates the runtime state and metadata associated with a single credential.
 type Auth struct {
+	// PoolID carries synthesized API-key membership. OAuth membership is persisted in Metadata["pool_id"].
+	PoolID string `json:"pool_id,omitempty"`
 	// ID uniquely identifies the auth record across restarts.
 	ID string `json:"id"`
 	// RegistrationEpoch tracks monotonic registration cycles across unregister/re-register.

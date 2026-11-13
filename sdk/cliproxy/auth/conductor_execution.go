@@ -19,6 +19,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/pool"
 	cliproxysession "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/session"
 	coreusage "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/usage"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
@@ -153,7 +154,11 @@ func preferredExecutionAttemptError(fallback, upstream error) error {
 	return markUpstreamExecutionAttempt(upstream)
 }
 
-func (m *Manager) normalizeSessionAffinityNeverTerminalError(err error, providers []string, model string, opts cliproxyexecutor.Options) error {
+func (m *Manager) normalizeSessionAffinityNeverTerminalError(ctx context.Context, err error, providers []string, model string, opts cliproxyexecutor.Options) error {
+	var scopeErr *poolError
+	if errors.As(err, &scopeErr) {
+		return err
+	}
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
@@ -171,7 +176,7 @@ func (m *Manager) normalizeSessionAffinityNeverTerminalError(err error, provider
 	if errors.As(err, &cooldownErr) && cooldownErr != nil {
 		return err
 	}
-	affinity, ok := m.Selector().(*SessionAffinitySelector)
+	affinity, ok := m.selectorForContext(ctx).(*SessionAffinitySelector)
 	if !ok || affinity == nil || !affinity.rebindOnNever {
 		return err
 	}
@@ -200,6 +205,13 @@ func isOpenAIImageExecutionOptions(opts cliproxyexecutor.Options) bool {
 }
 
 func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	if err := checkPoolRequest(ctx, req); err != nil {
+		return cliproxyexecutor.Response{}, err
+	}
+	opts = poolCallerOptions(ctx, opts)
+	if errScope := m.checkPoolScope(ctx); errScope != nil {
+		return cliproxyexecutor.Response{}, errScope
+	}
 	ctx = cliproxyexecutor.WithRequestProxyURL(ctx, opts.ProxyURL)
 	req, opts = cliproxysession.Enrich(req, opts)
 	ctx = WithCodexClientRequest(ctx, isOpenAIImageExecutionOptions(opts) || IsCodexClientRequest(ctx, opts.Headers))
@@ -261,7 +273,7 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 		}
 		lastErr = preferredExecutionAttemptError(lastErr, preferredUpstreamErr)
 		lastErr = unwrapExecutionBoundaryError(lastErr)
-		lastErr = m.normalizeSessionAffinityNeverTerminalError(lastErr, normalized, retryModel, opts)
+		lastErr = m.normalizeSessionAffinityNeverTerminalError(ctx, lastErr, normalized, retryModel, opts)
 		if !terminalRoundRejectedByScheduler && hasAntigravityProvider(normalized) && shouldAttemptAntigravityCreditsFallback(m, lastErr, normalized) {
 			if resp, ok, errCredits := m.tryAntigravityCreditsExecute(ctx, req, opts); errCredits != nil {
 				return cliproxyexecutor.Response{}, errCredits
@@ -276,6 +288,13 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 
 // It supports multiple providers for the same model and round-robins the starting provider per model.
 func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	if err := checkPoolRequest(ctx, req); err != nil {
+		return cliproxyexecutor.Response{}, err
+	}
+	opts = poolCallerOptions(ctx, opts)
+	if errScope := m.checkPoolScope(ctx); errScope != nil {
+		return cliproxyexecutor.Response{}, errScope
+	}
 	ctx = cliproxyexecutor.WithRequestProxyURL(ctx, opts.ProxyURL)
 	req, opts = cliproxysession.Enrich(req, opts)
 	ctx = WithCodexClientRequest(ctx, IsCodexClientRequest(ctx, opts.Headers))
@@ -330,7 +349,7 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 		}
 		lastErr = preferredExecutionAttemptError(lastErr, preferredUpstreamErr)
 		lastErr = unwrapExecutionBoundaryError(lastErr)
-		lastErr = m.normalizeSessionAffinityNeverTerminalError(lastErr, normalized, retryModel, opts)
+		lastErr = m.normalizeSessionAffinityNeverTerminalError(ctx, lastErr, normalized, retryModel, opts)
 		return cliproxyexecutor.Response{}, lastErr
 	}
 	return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
@@ -339,6 +358,13 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 // ExecuteStream performs a streaming execution using the configured selector and executor.
 // It supports multiple providers for the same model and round-robins the starting provider per model.
 func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
+	if err := checkPoolRequest(ctx, req); err != nil {
+		return nil, err
+	}
+	opts = poolCallerOptions(ctx, opts)
+	if errScope := m.checkPoolScope(ctx); errScope != nil {
+		return nil, errScope
+	}
 	ctx = cliproxyexecutor.WithRequestProxyURL(ctx, opts.ProxyURL)
 	req, opts = cliproxysession.Enrich(req, opts)
 	ctx = WithCodexClientRequest(ctx, isOpenAIImageExecutionOptions(opts) || IsCodexClientRequest(ctx, opts.Headers))
@@ -424,7 +450,7 @@ func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cli
 			lastErr = preferredExecutionAttemptError(lastErr, preferredUpstreamErr)
 		}
 		lastErr = unwrapExecutionBoundaryError(lastErr)
-		lastErr = m.normalizeSessionAffinityNeverTerminalError(lastErr, normalized, retryModel, opts)
+		lastErr = m.normalizeSessionAffinityNeverTerminalError(ctx, lastErr, normalized, retryModel, opts)
 		if !terminalRoundRejectedByScheduler && hasAntigravityProvider(normalized) && shouldAttemptAntigravityCreditsFallback(m, lastErr, normalized) {
 			if result, ok, errCredits := m.tryAntigravityCreditsExecuteStream(ctx, req, opts); errCredits != nil {
 				return nil, errCredits
@@ -740,7 +766,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			execCtx = syncMetadataSessionToContext(execCtx, execOpts.Metadata)
 			executionSeq := m.nextExecutionSeq()
 			startExec := time.Now()
-			resp, errExec := executor.Execute(execCtx, auth, execReq, execOpts)
+			resp, errExec := m.executeInPool(execCtx, executor, auth, execReq, execOpts)
 			errExec = markUpstreamExecutionAttemptFromContext(execCtx, errExec)
 			durationExec := time.Since(startExec)
 			if errExec != nil {
@@ -758,7 +784,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 					execCtx = syncMetadataSessionToContext(execCtx, execOpts.Metadata)
 					executionSeq = m.nextExecutionSeq()
 					startRetry := time.Now()
-					resp, errExec = executor.Execute(execCtx, auth, execReq, execOpts)
+					resp, errExec = m.executeInPool(execCtx, executor, auth, execReq, execOpts)
 					errExec = markUpstreamExecutionAttemptFromContext(execCtx, errExec)
 					durationRetry := time.Since(startRetry)
 					if errExec != nil {
@@ -958,7 +984,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 			execCtx = syncMetadataSessionToContext(execCtx, execOpts.Metadata)
 			executionSeq := m.nextExecutionSeq()
 			startExec := time.Now()
-			resp, errExec := executor.CountTokens(execCtx, auth, execReq, execOpts)
+			resp, errExec := m.countInPool(execCtx, executor, auth, execReq, execOpts)
 			errExec = markUpstreamExecutionAttemptFromContext(execCtx, errExec)
 			durationExec := time.Since(startExec)
 			if errExec != nil {
@@ -976,7 +1002,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 					execCtx = syncMetadataSessionToContext(execCtx, execOpts.Metadata)
 					executionSeq = m.nextExecutionSeq()
 					startRetry := time.Now()
-					resp, errExec = executor.CountTokens(execCtx, auth, execReq, execOpts)
+					resp, errExec = m.countInPool(execCtx, executor, auth, execReq, execOpts)
 					errExec = markUpstreamExecutionAttemptFromContext(execCtx, errExec)
 					durationRetry := time.Since(startRetry)
 					if errExec != nil {
@@ -2170,6 +2196,11 @@ func warnLogUpstreamFailure(ctx context.Context, entry *log.Entry, provider, mod
 // If the registered executor for the auth provider implements RequestPreparer,
 // it will be invoked to modify the request (e.g., add headers).
 func (m *Manager) InjectCredentials(req *http.Request, authID string) error {
+	if req != nil {
+		if _, scoped := pool.FromContext(req.Context()); scoped {
+			return &poolError{"pool_adapter_unsupported", http.StatusNotImplemented}
+		}
+	}
 	if req == nil || authID == "" {
 		return nil
 	}
@@ -2191,6 +2222,9 @@ func (m *Manager) InjectCredentials(req *http.Request, authID string) error {
 
 // PrepareHttpRequest injects provider credentials into the supplied HTTP request.
 func (m *Manager) PrepareHttpRequest(ctx context.Context, auth *Auth, req *http.Request) error {
+	if _, scoped := pool.FromContext(ctx); scoped {
+		return &poolError{"pool_adapter_unsupported", http.StatusNotImplemented}
+	}
 	if m == nil {
 		return &Error{Code: "provider_not_found", Message: "manager is nil"}
 	}
@@ -2246,6 +2280,9 @@ func (m *Manager) NewHttpRequest(ctx context.Context, auth *Auth, method, target
 
 // HttpRequest injects provider credentials into the supplied HTTP request and executes it.
 func (m *Manager) HttpRequest(ctx context.Context, auth *Auth, req *http.Request) (*http.Response, error) {
+	if _, scoped := pool.FromContext(ctx); scoped {
+		return nil, &poolError{"pool_adapter_unsupported", http.StatusNotImplemented}
+	}
 	if m == nil {
 		return nil, &Error{Code: "provider_not_found", Message: "manager is nil"}
 	}
@@ -2428,12 +2465,12 @@ func (m *Manager) VerifyInference(ctx context.Context, id, model string) (*Auth,
 	credVersion := auth.CredentialVersion
 	regEpoch := auth.RegistrationEpoch
 
-	streamRes, errStream := executor.ExecuteStream(execCtx, auth, req, opts)
+	streamRes, errStream := m.streamInPool(execCtx, executor, auth, req, opts)
 	if errStream != nil {
 		rerr := resultErrorFromError(errStream)
 		if rerr != nil && rerr.HTTPStatus == http.StatusNotImplemented {
 			opts.Stream = false
-			resp, errExec := executor.Execute(execCtx, auth, req, opts)
+			resp, errExec := m.executeInPool(execCtx, executor, auth, req, opts)
 			rerrExec := resultErrorFromError(errExec)
 			if rerrExec != nil {
 				rerrExec.Message = sanitizeRenewalMessage(rerrExec.Message)

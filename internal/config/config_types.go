@@ -767,6 +767,9 @@ type ClaudeKey struct {
 	// Prefix optionally namespaces models for this credential (e.g., "teamA/claude-sonnet-4").
 	Prefix string `yaml:"prefix,omitempty" json:"prefix,omitempty"`
 
+	// PoolID assigns this credential to one account pool.
+	PoolID string `yaml:"pool-id,omitempty" json:"pool-id,omitempty"`
+
 	// BaseURL is the base URL for the Claude API endpoint.
 	// If empty, the default Claude API URL will be used.
 	BaseURL string `yaml:"base-url" json:"base-url"`
@@ -892,6 +895,9 @@ type CodexKey struct {
 	// Prefix optionally namespaces models for this credential (e.g., "teamA/gpt-5-codex").
 	Prefix string `yaml:"prefix,omitempty" json:"prefix,omitempty"`
 
+	// PoolID assigns this credential to one account pool.
+	PoolID string `yaml:"pool-id,omitempty" json:"pool-id,omitempty"`
+
 	// BaseURL is the base URL for the Codex API endpoint.
 	// If empty, the default Codex API URL will be used.
 	BaseURL string `yaml:"base-url" json:"base-url"`
@@ -1016,6 +1022,9 @@ type GeminiKey struct {
 	// Prefix optionally namespaces models for this credential (e.g., "teamA/gemini-3-pro-preview").
 	Prefix string `yaml:"prefix,omitempty" json:"prefix,omitempty"`
 
+	// PoolID assigns this credential to one account pool.
+	PoolID string `yaml:"pool-id,omitempty" json:"pool-id,omitempty"`
+
 	// BaseURL optionally overrides the Gemini API endpoint.
 	BaseURL string `yaml:"base-url,omitempty" json:"base-url,omitempty"`
 
@@ -1108,6 +1117,9 @@ type OpenAICompatibility struct {
 	// Prefix optionally namespaces model aliases for this provider (e.g., "teamA/kimi-k2").
 	Prefix string `yaml:"prefix,omitempty" json:"prefix,omitempty"`
 
+	// PoolID assigns this credential to one account pool.
+	PoolID string `yaml:"pool-id,omitempty" json:"pool-id,omitempty"`
+
 	// BaseURL is the base URL for the external OpenAI-compatible API endpoint.
 	BaseURL string `yaml:"base-url" json:"base-url"`
 
@@ -1141,6 +1153,8 @@ type OpenAICompatibility struct {
 
 // OpenAICompatibilityAPIKey represents an API key configuration with optional proxy setting.
 type OpenAICompatibilityAPIKey struct {
+	// PoolID overrides the group; an explicit empty value leaves the key unassigned.
+	PoolID *string `yaml:"pool-id,omitempty" json:"pool-id,omitempty"`
 	// APIKey is the authentication key for accessing the external API services.
 	APIKey string `yaml:"api-key" json:"api-key"`
 

@@ -73,6 +73,8 @@ var v8KeyFamilies = []configPath{
 
 func buildV8Paths() []configPath {
 	prefixes := []configPath{
+		{"account-pools", "routing.account-pools"}, {"pool-clients", "access.clients"},
+		{"pool-provider-clients", "access.provider-clients"}, {"legacy-key-pools", "access.legacy-key-pools"},
 		{"host", "server.host"}, {"port", "server.port"}, {"max-request-body-bytes", "server.max-request-body-bytes"}, {"trusted-proxies", "server.trusted-proxies"},
 		{"github-token", "server.github-token"},
 		{"tls", "server.tls"}, {"shutdown-timeout", "server.shutdown-timeout"}, {"commercial-mode", "server.commercial-mode"}, {"discovery", "server.discovery"}, {"kv-store", "server.kv-store"},
@@ -273,6 +275,9 @@ func (cfg *Config) SyncServerResponseCompression() {
 // UnmarshalYAML accepts both layouts, including partially migrated documents.
 // Presence, rather than Go zero values, determines which setting wins.
 func (cfg *Config) UnmarshalYAML(node *yaml.Node) error {
+	if err := validatePoolConfigNodes(node); err != nil {
+		return err
+	}
 	root, err := flattenV8(node)
 	if err != nil {
 		return err
@@ -285,6 +290,9 @@ func (cfg *Config) UnmarshalYAML(node *yaml.Node) error {
 		return errValidate
 	}
 	if errValidate := (*Config)(&decoded).ValidateUserAgents(); errValidate != nil {
+		return errValidate
+	}
+	if errValidate := (*Config)(&decoded).ValidateAccountPools(); errValidate != nil {
 		return errValidate
 	}
 	*cfg = Config(decoded)
@@ -386,7 +394,7 @@ func flattenV8(node *yaml.Node) (*yaml.Node, error) {
 }
 
 var sharedKeyFields = map[string]bool{
-	"priority": true, "prefix": true, "proxy-url": true, "headers": true,
+	"priority": true, "prefix": true, "pool-id": true, "proxy-url": true, "headers": true,
 	"models": true, "excluded-models": true, "disable-cooling": true,
 	"request-retry": true, "request-scoped-errors": true,
 	// connection-pool follows proxy-url: a group-level default that each key may
@@ -926,6 +934,9 @@ func ValidateV8Config(data []byte) error {
 		return fmt.Errorf("empty config")
 	}
 	root := doc.Content[0]
+	if err := validatePoolConfigNodes(root); err != nil {
+		return err
+	}
 	flat, err := flattenV8(root)
 	if err != nil {
 		return err
@@ -979,6 +990,9 @@ func ValidateV8Config(data []byte) error {
 		return errDecode
 	}
 	if errValidate := cfg.Models.Validate(); errValidate != nil {
+		return errValidate
+	}
+	if errValidate := (*Config)(&cfg).ValidateAccountPools(); errValidate != nil {
 		return errValidate
 	}
 	return (*Config)(&cfg).ValidateUserAgents()

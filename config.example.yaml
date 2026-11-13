@@ -132,6 +132,14 @@ management:
 
 # Client authentication for the proxy API. These are not upstream provider keys.
 access:
+  # Pool grants are deny-by-default when routing.account-pools.enabled is true.
+  # legacy-key-pools: [basic]  # Grants shared by keys in api-keys below.
+  # clients:
+  #   - id: premium-client
+  #     api-key: "replace-with-a-new-secret"
+  #     allowed-pools: [premium]
+  # provider-clients:
+  #   - {provider: trusted-sso, id: service-client, allowed-pools: [basic]}
   # API keys for authentication
   api-keys:
     - "your-api-key-1"
@@ -175,6 +183,15 @@ access:
 
 # Routing strategy for selecting credentials when multiple match.
 routing:
+  # Opt-in account isolation. Restart when changing enabled; see docs/account-pools.md.
+  # Each pool exposes /pools/<id>/v1 and /pools/<id>/v1beta.
+  # Accounts are unassigned until their pool-id (API key) or pool_id (OAuth) is set.
+  # account-pools:
+  #   enabled: true
+  #   unscoped: {mode: deny} # Or {mode: default, pool-id: basic} for explicit migration.
+  #   pools:
+  #     - {id: basic, name: Basic, enabled: true}
+  #     - {id: premium, name: Premium, enabled: true, strategy: round-robin}
   strategy: "round-robin" # round-robin (default), weighted-round-robin, fill-first
   # weighted-round-robin uses each credential's integer weight (default 1, maximum 1,000,000).
   # Non-positive weights exclude the credential while this strategy is active.
