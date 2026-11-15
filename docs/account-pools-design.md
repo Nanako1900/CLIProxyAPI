@@ -68,7 +68,7 @@ design does not establish that an implementation passes them.
 | Isolation unit | One runtime credential belongs to zero or one pool. Unassigned credentials cannot serve pooled traffic. |
 | URL | Fixed `/pools/{pool_id}` namespace; no arbitrary user-defined path templates. |
 | Pool identifiers | Immutable lowercase slugs. Display names can change. |
-| Pool lifecycle | Create, update, enable, and disable. No hard deletion or ID recycling in the initial release. |
+| Pool lifecycle | Create, update, enable, disable, and delete a previously disabled empty pool with a current config ETag. Never recycle IDs for another customer. |
 | Ownership | One shared auth manager, executor registry, and credential lifecycle. Do not instantiate a manager per pool. |
 | Selection | Filter by pool before priority, weight, transport preference, or affinity. Partition scheduling cursors by pool. |
 | Exhaustion | Retry within the pool under existing retry rules, then return an error. No implicit cross-pool failover. |
@@ -858,9 +858,16 @@ membership require a specific strong `If-Match` ETag. Missing preconditions retu
 Unrelated legacy config writes retain their existing optional-precondition behavior.
 Apply this check to root/YAML writes as well as narrow paths.
 
-Pool definitions are retained when disabled. Removing an existing definition or
-renaming its ID through online config replacement returns
-`pool_removal_not_supported`. To disable the unscoped default pool, atomically
+Pool definitions are retained when disabled. The management panel now supports
+removing a previously disabled, empty pool through a versioned config patch.
+The server rejects missing or wildcard preconditions (428), stale config (412),
+enabled pools (`pool_must_be_disabled`, 409), and remaining runtime membership
+(`pool_not_empty`, 409). Configuration validation also rejects remaining
+config-backed membership, default routes or named grants. The panel removes
+named grants in the same patch and preserves wildcard grants and credentials.
+Config removal and management membership writes share a mutation lock. This is
+not a distributed transaction with external file writers. Saved pool IDs remain
+immutable in the UI and must not be recycled. To disable the unscoped default pool, atomically
 change unscoped routing to `deny` or another enabled default in the same config
 update. Reject a configuration that leaves the default invalid.
 

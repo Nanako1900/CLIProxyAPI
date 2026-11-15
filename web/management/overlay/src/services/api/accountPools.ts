@@ -73,7 +73,15 @@ export function readPoolDraft(config: Record<string, unknown>): PoolDraft {
     settings: {
       enabled: routing.enabled === true,
       unscoped: { mode: 'deny', ...object(routing.unscoped) },
-      pools: structuredClone(list(routing.pools)) as Pool[],
+      pools: list(routing.pools).map((entry) => {
+        const pool = structuredClone(object(entry));
+        return {
+          ...pool,
+          id: text(pool.id),
+          name: text(pool.name),
+          enabled: pool.enabled === true,
+        };
+      }),
     },
     clients: clients(access.clients),
     providerClients: clients(access['provider-clients']),
@@ -90,6 +98,78 @@ export function poolConfigPatch(draft: PoolDraft) {
       'legacy-key-pools': draft.legacyGrants,
     },
   };
+}
+
+export function samePoolDraft(left: PoolDraft, right: PoolDraft): boolean {
+  const ordered = (draft: PoolDraft) =>
+    JSON.stringify(draft, (_key, value: unknown) =>
+      isRecord(value)
+        ? Object.fromEntries(
+            Object.keys(value)
+              .sort()
+              .map((key) => [key, value[key]])
+          )
+        : value
+    );
+  return ordered(left) === ordered(right);
+}
+
+// Remove only named references. Wildcard grants retain their existing meaning.
+export function removePoolFromDraft(draft: PoolDraft, id: string): PoolDraft {
+  const next = structuredClone(draft);
+  next.settings.pools = next.settings.pools.filter((pool) => pool.id !== id);
+  if (next.settings.unscoped['pool-id'] === id) next.settings.unscoped = { mode: 'deny' };
+  next.legacyGrants = next.legacyGrants.filter((grant) => grant !== id);
+  for (const client of [...next.clients, ...next.providerClients]) {
+    client['allowed-pools'] = client['allowed-pools'].filter((grant) => grant !== id);
+  }
+  return next;
+}
+
+export function poolRemovalBlockers(snapshot: PoolSnapshot, id: string): string[] {
+  const pool = snapshot.draft.settings.pools.find((pool) => pool.id === id);
+  if (!pool) return ['pool_state_unavailable'];
+  const reasons: string[] = [];
+  if (pool.enabled) reasons.push('pool_must_be_disabled');
+  if (
+    snapshot.members.some((member) => member.pool_id === id) ||
+    snapshot.configMembers.some((member) => member.poolId === id)
+  )
+    reasons.push('pool_not_empty');
+  return reasons;
+}
+
+export function poolMemberRows(snapshot: PoolSnapshot): (PoolMember | ConfigPoolMember)[] {
+  return [
+    ...snapshot.members.filter((member) => member.source !== 'config'),
+    ...snapshot.configMembers,
+  ];
+}
+
+export function verifyPoolMembership(
+  snapshot: PoolSnapshot,
+  member: PoolMember | ConfigPoolMember,
+  poolId: string
+): 'active' | 'pending' {
+  if ('family' in member) {
+    const saved = snapshot.configMembers.find(
+      (item) =>
+        item.family === member.family && item.group === member.group && item.key === member.key
+    );
+    if (!saved || saved.poolId !== poolId) throw membershipNotConfirmed();
+    const runtime = snapshot.members.find((item) => item.auth_index === saved.authIndex);
+    return runtime?.pool_id === poolId ? 'active' : 'pending';
+  }
+  if (!snapshot.members.some((item) => item.id === member.id && item.pool_id === poolId)) {
+    throw membershipNotConfirmed();
+  }
+  return 'active';
+}
+
+function membershipNotConfirmed() {
+  return Object.assign(new Error('membership_not_confirmed'), {
+    apiCode: 'membership_not_confirmed',
+  });
 }
 
 export function configPoolMembers(config: Record<string, unknown>): ConfigPoolMember[] {
@@ -229,6 +309,11 @@ export function accountPoolsConnection() {
         }
       );
       assertCurrent();
+      const saved = await client.get<{ id: string; pool_id: string }>('/credentials/pool', {
+        params: { id: member.id },
+      });
+      assertCurrent();
+      if (saved.id !== member.id || saved.pool_id !== poolId) throw membershipNotConfirmed();
     },
   };
 }

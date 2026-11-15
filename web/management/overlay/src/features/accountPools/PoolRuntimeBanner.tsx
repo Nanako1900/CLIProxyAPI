@@ -23,9 +23,22 @@ export function PoolRuntimeBanner({
           : 'unknown';
   const blocked = ['restart_required', 'home_unsupported', 'unknown'].includes(state);
   return (
-    <div className={styles.info} role={blocked ? 'alert' : 'status'}>
-      <strong>{t('account_pools.runtime_title')}</strong>
-      <div>{t(`account_pools.runtime_${state}`)}</div>
+    <div
+      className={`${styles.runtime} ${blocked ? styles.runtimeBlocked : ''}`}
+      role={blocked ? 'alert' : 'status'}
+    >
+      <strong>
+        {t(
+          state === 'active' ? 'account_pools.runtime_active_short' : 'account_pools.runtime_title'
+        )}
+      </strong>
+      <div>
+        {t(
+          state === 'active'
+            ? 'account_pools.runtime_active_hint'
+            : `account_pools.runtime_${state}`
+        )}
+      </div>
     </div>
   );
 }

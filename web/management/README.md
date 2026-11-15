@@ -14,6 +14,9 @@ logins, keeps it optional for plugins, sends it in a POST body, and explains the
 plugin, using its existing authenticated refresh-token login API.
 `account-pools.patch` adds the Account pools navigation and route, with localized
 pool definitions, client grants, account assignment and protocol base URLs.
+`account-pools-polish.patch` updates all seven locales for the tabbed pool
+workspace, modal editors, source-aware account list and guarded deletion. The
+overlay verifies assignment readback before reporting success.
 `quota-shadow.patch` adds the Quota shadow navigation, route and seven locales.
 See [Quota shadow](quota-shadow.md) for configuration, runtime statistics,
 the review fixes, and verification steps.
@@ -70,7 +73,12 @@ For account-pool UI verification, use an isolated CPA with dummy keys and a
 temporary auth directory. Create a pool, save grants, move both an OAuth account
 and a configured API key, and verify persisted and live membership. Change the
 configuration concurrently to confirm a stale save is rejected and its draft
-retained. Check connection changes, a narrow viewport, and explicit unassignment.
+retained. Verify that saved pool IDs stay locked after another pool is removed.
+Attempt to delete an enabled or occupied pool, then disable/save and empty it;
+confirm deletion removes named grants but preserves wildcard grants and account
+files. Check same-label plugin accounts by file ID, readback failures, connection
+changes, a narrow viewport, and explicit unassignment. The backend regression
+uses a token-only Kiro parser to cover watcher reload, token refresh and restart.
 The tests cover source preservation, omitted grants, wildcard validation, ETags,
 connection revisions (including ABA switches), missing ETags, and localized
 disabled controls. Drafts and raw errors containing credentials are never stored
