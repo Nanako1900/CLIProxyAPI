@@ -215,6 +215,41 @@ func TestAccountPoolsStreamFencesMembershipUntilExecutorCloses(t *testing.T) {
 	}
 }
 
+func TestAccountPoolsTrackedStreamFencesMembership(t *testing.T) {
+	m, e := newPoolTestManager(t)
+	e.chunks = make(chan executor.StreamChunk, 1)
+	e.chunks <- executor.StreamChunk{Payload: []byte("ok")}
+	var closeOnce sync.Once
+	closeStream := func() { closeOnce.Do(func() { close(e.chunks) }) }
+	defer closeStream()
+	ctx, cancel := context.WithCancel(poolTestContext("basic"))
+	defer cancel()
+	stream, err := m.ExecuteStream(ctx, []string{e.Identifier()}, executor.Request{Model: "pool-test-model"}, executor.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := m.InFlightSnapshot(); snapshot.InFlight != 1 || snapshot.ByProvider[e.Identifier()] != 1 {
+		t.Fatalf("pooled stream missing from in-flight counts: %+v", snapshot)
+	}
+	if _, ok := <-stream.Chunks; !ok {
+		t.Fatal("stream closed before executor")
+	}
+	selected, _ := m.GetByID("pool-a1")
+	moved := selected.Clone()
+	moved.PoolID = "premium"
+	moved.Metadata["pool_id"] = "premium"
+	cancel()
+	if _, err = m.Update(context.Background(), moved); err == nil {
+		t.Fatal("in-flight cancellation released a live pool executor")
+	}
+	closeStream()
+	for range stream.Chunks {
+	}
+	if _, err = m.Update(context.Background(), moved); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAccountPoolsMoveFencesAdmissionsDuringStorage(t *testing.T) {
 	m, _ := newPoolTestManager(t)
 	entered, finish := make(chan struct{}), make(chan struct{})

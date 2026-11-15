@@ -255,8 +255,8 @@ func TestOAuthRecoveryAndSIWCUseAccountProxy(t *testing.T) {
 			if status := waitForOAuthStatus(t, fixture.router, state); status.Status != "error" {
 				t.Fatalf("denied callback status = %#v", status)
 			}
-			fixture.h.siwcOAuthFactory = func(cfg *config.Config) siwcOAuthService {
-				bindingProxy = cfg.ProxyURL
+			fixture.h.siwcOAuthFactory = func(_ *config.Config, accountProxyURL string) siwcOAuthService {
+				bindingProxy = accountProxyURL
 				return fixture.service
 			}
 			fixture.start(t)

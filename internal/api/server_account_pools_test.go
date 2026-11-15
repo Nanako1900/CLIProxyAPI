@@ -60,6 +60,30 @@ func TestAccountPoolRoutesFailClosed(t *testing.T) {
 	}
 }
 
+func TestAccountPoolMuseCodeRoutesFailClosed(t *testing.T) {
+	cfg := testServerPoolConfig()
+	cfg.AccountPools.Unscoped = config.PoolUnscopedConfig{Mode: "default", PoolID: "basic"}
+	server := newTestServerWithConfig(t, cfg)
+	for _, prefix := range []string{"", "/pools/basic"} {
+		for _, route := range []struct{ method, path string }{
+			{http.MethodGet, "/muse-code/models"},
+			{http.MethodGet, "/muse-code/config"},
+			{http.MethodPost, "/muse-code/search"},
+			{http.MethodPost, "/muse-code/browser_open"},
+		} {
+			t.Run(prefix+route.path, func(t *testing.T) {
+				req := httptest.NewRequest(route.method, prefix+route.path, nil)
+				req.Header.Set("Authorization", "Bearer pool-client-key")
+				rec := httptest.NewRecorder()
+				server.engine.ServeHTTP(rec, req)
+				if rec.Code != http.StatusNotImplemented || !strings.Contains(rec.Body.String(), "pool_adapter_unsupported") {
+					t.Fatalf("unscoped adapter bypassed pool isolation: %d %s", rec.Code, rec.Body.String())
+				}
+			})
+		}
+	}
+}
+
 type poolResourcePlugin struct{}
 
 func (p poolResourcePlugin) RegisterManagement(context.Context, pluginapi.ManagementRegistrationRequest) (pluginapi.ManagementRegistrationResponse, error) {
