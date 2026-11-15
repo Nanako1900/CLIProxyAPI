@@ -276,6 +276,7 @@ func (s *FileTokenStore) readAuthFiles(path, baseDir string) ([]*cliproxyauth.Au
 					continue
 				}
 				cliproxyauth.NormalizeCredentialMetadata(auth.Metadata)
+				cliproxyauth.ApplyAuthPoolMetadata(auth, metadata)
 				if len(auths) > 1 {
 					cliproxyauth.MarkPluginVirtualAuth(auth, path, index)
 				}

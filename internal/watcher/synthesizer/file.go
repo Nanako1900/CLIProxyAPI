@@ -142,6 +142,7 @@ func synthesizeFileAuths(ctx *SynthesisContext, fullPath string, data []byte) ([
 					continue
 				}
 				coreauth.NormalizeCredentialMetadata(auth.Metadata)
+				coreauth.ApplyAuthPoolMetadata(auth, metadata)
 				if filePortalHint != "" {
 					hasPortalHint := false
 					for _, key := range []string{"oauth_provider", "portal"} {

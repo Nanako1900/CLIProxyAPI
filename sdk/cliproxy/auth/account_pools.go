@@ -38,6 +38,27 @@ func (a *Auth) AccountPoolID() string {
 	return a.PoolID
 }
 
+// ApplyAuthPoolMetadata restores host-owned membership from the persisted source.
+// Plugin parsers may expose only token fields. An explicit empty or malformed
+// value must also override their view, so reload cannot restore another pool.
+func ApplyAuthPoolMetadata(a *Auth, source map[string]any) {
+	if a == nil {
+		return
+	}
+	value, exists := source["pool_id"]
+	if !exists {
+		return
+	}
+	if a.Metadata == nil {
+		a.Metadata = make(map[string]any)
+	}
+	a.Metadata["pool_id"] = value
+	a.PoolID, _ = value.(string)
+	if setter, ok := a.Storage.(interface{ SetMetadata(map[string]any) }); ok {
+		setter.SetMetadata(a.Metadata)
+	}
+}
+
 func (m *Manager) checkPoolScope(ctx context.Context) error {
 	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
 	scope, scoped := pool.FromContext(ctx)

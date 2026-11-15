@@ -80,6 +80,8 @@ func (h *Handler) GetCredentialPool(c *gin.Context) {
 // PatchCredentialPool uses the credential mutation gate and durable manager update.
 // Busy credentials must finish their current upstream operation before being moved.
 func (h *Handler) PatchCredentialPool(c *gin.Context) {
+	h.poolMutationMu.Lock()
+	defer h.poolMutationMu.Unlock()
 	if h.authManager == nil {
 		c.JSON(503, gin.H{"error": "pool_state_unavailable"})
 		return

@@ -16,18 +16,21 @@ the image or rebuild the panel with `web/management/build.sh`; an independently
 downloaded upstream panel does not contain this extension. An explicit
 `MANAGEMENT_STATIC_PATH` overrides the bundled panel and must also be updated.
 
-1. Create pools, choose names and scheduling strategies, and save. Saved IDs
-   are immutable in the UI; retire a pool by disabling it.
-2. Grant existing access keys a shared pool list, or add dedicated client keys
+1. In **Pools**, create or edit a pool in its dialog, then review and save the
+   draft. Cards show membership counts, state and one protocol-specific base
+   URL. Saved IDs are immutable.
+2. In **Access**, grant existing access keys a shared pool list, or add dedicated client keys
    with individual grants. External authenticated identities have their own
    section. Empty grants deny access; `*` explicitly includes future pools.
    Keys stay masked and drafts are not written to browser storage.
-3. Under **Account membership**, search/filter accounts and choose **Assign
+3. Under **Accounts**, search/filter accounts and choose **Assign
    pool**. OAuth membership uses its versioned management endpoint. API-key
    membership changes only its provider configuration list, preserving other
    key settings and group policies. An explicit unassignment overrides an
-   inherited group pool. Plugin-owned accounts cannot be moved here.
-4. Enable isolation only after preparing pools, grants and membership, then
+   inherited group pool. File-backed plugin credentials (including Kiro) use the
+   same versioned assignment flow. Plugin-managed virtual accounts remain
+   read-only and must be changed at their source.
+4. In **Settings**, enable isolation only after preparing pools, grants and membership, then
    restart CPA. Changes to the isolation switch require a restart in either
    direction. Copy the protocol-specific base URL from the desired pool card.
 5. Refresh and compare the configured API-key pool with live membership. A
@@ -35,11 +38,23 @@ downloaded upstream panel does not contain this extension. An explicit
    or restart after draining. Saving the source alone does not prove that a
    busy credential has moved at runtime.
 
+To delete a saved pool, first disable it and save, then move or unassign **all**
+its accounts, including disabled accounts and configured API keys. Select
+**Delete** on the pool card. The dialog lists any blockers. Deletion removes
+only the pool definition and its named client grants; credential files and
+wildcard grants are retained. Save or discard other drafts first. The server
+requires the current config ETag, a previously disabled pool and empty runtime
+membership. Config validation rejects any remaining source references. Removal
+is serialized with management membership writes; direct file edits still require
+single-writer coordination. Do not reuse retired pool IDs for another customer.
+
 Settings and memberships use ETags and the originating authenticated connection.
 A concurrent change returns a conflict instead of overwriting a newer version;
 refresh, review and reapply. Unsaved settings disable membership edits, and
 navigation/refresh prompts before discarding a draft. Failed or unconfirmed
-writes require readback before retrying. The page does not automatically retry
+writes require readback before retrying. Credential assignments display success
+only after an individual membership read and a refreshed inventory agree.
+Configured-key writes that have not reached runtime are shown as pending. The page does not automatically retry
 mutations. It displays supported protocols and restart requirements; it does not
 implement batch membership transactions or pool accounting reports.
 
@@ -160,10 +175,13 @@ support checks continue to apply.
 
 Home mode cannot currently execute pooled requests (`503 pool_protocol_unsupported`).
 Downstream Responses WebSockets, realtime/live/tunnel, video resources, native
-Interactions, direct search, Amp routes, relay adapters, plugin executors, and
-plugin schedulers are not enabled for pooled execution. They fail closed with
+Interactions, direct search, Amp routes, relay adapters and active plugin
+schedulers are not enabled for pooled execution. Those adapters fail closed with
 `501 pool_adapter_unsupported` (an unscoped request can first fail the missing-pool
-check). Management and OAuth callback routes retain their existing authorization.
+check). Plugin executors reached through the normal HTTP credential-selection
+path receive the selected pool credential; plugin-managed virtual credentials
+still require source-managed membership. Management and OAuth callback routes
+retain their existing authorization.
 The built-in Grok-specific model catalog is bypassed for scoped requests.
 
 Do not enable account pools on an instance requiring those adapters. Their
@@ -191,7 +209,11 @@ secret-free live inventory, source classification and per-account ETags.
 It returns `Cache-Control: no-store` and includes disabled/unassigned accounts.
 An active upstream operation returns 409 `credential_busy`. Stop new traffic to
 the source pool, let requests finish, read a fresh ETag, and retry. Config-source
-and plugin-owned credentials must be changed at their source.
+and plugin-managed virtual credentials must be changed at their source.
+For file-backed plugin credentials, CPA restores the persisted top-level
+`pool_id` after plugin parsing on both startup and watcher reload, even when the
+plugin exposes only token metadata. Explicit unassignment is preserved; malformed
+values fail closed. Token refresh retains the current host-owned membership.
 
 A move fences new admissions while storage commits. The new membership is only
 published after persistence succeeds. A storage error leaves the credential

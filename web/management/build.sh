@@ -34,6 +34,7 @@ git apply "$extension_dir/account-pools.patch"
 git apply "$extension_dir/quota-shadow.patch"
 git apply "$extension_dir/account-pools-runtime.patch"
 git apply "$extension_dir/user-agents.patch"
+git apply "$extension_dir/account-pools-polish.patch"
 cp -R "$extension_dir/overlay/." .
 bun install --frozen-lockfile
 bun run verify

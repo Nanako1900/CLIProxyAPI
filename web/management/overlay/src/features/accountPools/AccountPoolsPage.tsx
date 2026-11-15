@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
@@ -12,15 +10,24 @@ import {
   configMembershipPatch,
   poolConfigPatch,
   validatePoolDraft,
+  samePoolDraft,
+  removePoolFromDraft,
+  poolRemovalBlockers,
+  poolMemberRows,
+  verifyPoolMembership,
   type PoolDraft,
   type PoolSnapshot,
   type PoolMember,
   type PoolRuntime,
   type ConfigPoolMember,
 } from '@/services/api/accountPools';
-import { ClientControls, PoolControls } from './PoolControls';
+import { ClientControls, PoolControls, PoolSettings } from './PoolControls';
+import { PoolMembers } from './PoolMembers';
 import { PoolRuntimeBanner } from './PoolRuntimeBanner';
 import styles from './AccountPoolsPage.module.scss';
+
+const tabs = ['pools', 'members', 'access', 'settings'] as const;
+type Tab = (typeof tabs)[number];
 
 export function AccountPoolsPage() {
   const apiBase = useAuthStore((state) => state.apiBase);
@@ -44,24 +51,26 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [needsRefresh, setNeedsRefresh] = useState(false);
   const [review, setReview] = useState(false);
   const [runtime, setRuntime] = useState<PoolRuntime | null>(null);
   const [runtimeFailed, setRuntimeFailed] = useState(false);
+  const [tab, setTab] = useState<Tab>('pools');
   const [filter, setFilter] = useState('*');
-  const [search, setSearch] = useState('');
-  const [limit, setLimit] = useState(40);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [assignment, setAssignment] = useState<{
     member: PoolMember | ConfigPoolMember;
     poolId: string;
   } | null>(null);
   const generation = useRef(0);
   const alive = useRef(false);
+  const mutation = useRef(false);
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const notify = useNotificationStore((state) => state.showNotification);
   const confirm = useNotificationStore((state) => state.showConfirmation);
-  const dirty = Boolean(
-    snapshot && draft && JSON.stringify(snapshot.draft) !== JSON.stringify(draft)
-  );
+  const dirty = Boolean(snapshot && draft && !samePoolDraft(snapshot.draft, draft));
   const disabled = saving || loading || !connected;
+  const writeDisabled = disabled || needsRefresh;
 
   useUnsavedChangesGuard({
     shouldBlock: dirty || saving,
@@ -83,7 +92,13 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
   }, [dirty, saving]);
 
   const reportError = useCallback((failure: unknown) => {
-    const details = failure as { status?: number; apiCode?: string; message?: string };
+    const details = failure as { status?: number; apiCode?: string };
+    const codes = [
+      'pool_must_be_disabled',
+      'pool_not_empty',
+      'pool_state_unavailable',
+      'membership_not_confirmed',
+    ];
     const key =
       details.status === 412
         ? 'conflict'
@@ -91,14 +106,16 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
           ? 'busy'
           : details.apiCode === 'membership_source_managed'
             ? 'source_managed'
-            : details.status === 404
-              ? 'unsupported'
-              : 'failed';
-    // Never render raw server errors: validation messages may contain a configured secret.
+            : codes.includes(details.apiCode || '')
+              ? details.apiCode!
+              : details.status === 404
+                ? 'unsupported'
+                : 'failed';
+    // Validation errors may contain configured secrets; only display known messages.
     setError(key);
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<PoolSnapshot | undefined> => {
     if (!connected) {
       setLoading(false);
       return;
@@ -121,8 +138,13 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
       if (!alive.current || request !== generation.current) return;
       setSnapshot(next);
       setDraft(structuredClone(next.draft));
+      setNeedsRefresh(false);
+      return next;
     } catch (failure) {
-      if (alive.current && request === generation.current) reportError(failure);
+      if (alive.current && request === generation.current) {
+        reportError(failure);
+        setNeedsRefresh(true);
+      }
     } finally {
       if (alive.current && request === generation.current) setLoading(false);
     }
@@ -137,92 +159,138 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
   }, [load]);
 
   const refresh = () => {
+    const reload = () => {
+      if (alive.current) {
+        setNotice('');
+        void load();
+      }
+    };
     if (dirty)
       confirm({
         title: t('account_pools.discard'),
         message: t('account_pools.discard_hint'),
-        onConfirm: () => {
-          if (alive.current) void load();
-        },
+        onConfirm: reload,
       });
-    else void load();
+    else reload();
   };
-  const save = async () => {
-    if (!snapshot || !draft || disabled) return;
+  const beginMutation = () => {
+    if (writeDisabled || mutation.current) return false;
+    mutation.current = true;
     setSaving(true);
     setError('');
     setNotice('');
+    return true;
+  };
+  const endMutation = () => {
+    mutation.current = false;
+    if (alive.current) setSaving(false);
+  };
+  const mutationFailed = (failure: unknown) => {
+    if (alive.current) {
+      reportError(failure);
+      setNeedsRefresh(true);
+    }
+  };
+  const save = async () => {
+    if (!snapshot || !draft || !beginMutation()) return;
+    const modeChanged = snapshot.draft.settings.enabled !== draft.settings.enabled;
     try {
       await connection.saveConfig(snapshot.etag, poolConfigPatch(draft));
       if (!alive.current) return;
       useConfigStore.getState().clearCache();
-      setNotice(
-        t(
-          snapshot.draft.settings.enabled !== draft.settings.enabled
-            ? 'account_pools.restart_required'
-            : 'account_pools.saved'
-        )
-      );
       setReview(false);
-      await load();
-    } catch (failure) {
-      if (alive.current) {
-        reportError(failure);
-        setReview(false);
+      const next = await load();
+      if (!next) return;
+      if (!samePoolDraft(next.draft, draft)) {
+        mutationFailed({ apiCode: 'membership_not_confirmed' });
+        return;
       }
+      setNotice(t(modeChanged ? 'account_pools.restart_required' : 'account_pools.saved'));
+    } catch (failure) {
+      mutationFailed(failure);
+      if (alive.current) setReview(false);
     } finally {
-      if (alive.current) setSaving(false);
+      endMutation();
     }
   };
   const assign = async () => {
-    if (!assignment || !snapshot || disabled) return;
-    setSaving(true);
-    setError('');
-    setNotice('');
+    if (!assignment || !snapshot || !beginMutation()) return;
     try {
       if ('family' in assignment.member) {
         await connection.saveConfig(
           snapshot.etag,
           configMembershipPatch(snapshot.config, assignment.member, assignment.poolId)
         );
-        if (alive.current) setNotice(t('account_pools.config_saved'));
       } else {
         await connection.assign(assignment.member, assignment.poolId);
-        if (alive.current) setNotice(t('account_pools.member_saved'));
       }
       if (!alive.current) return;
       useConfigStore.getState().clearCache();
       setAssignment(null);
-      await load();
+      const next = await load();
+      if (!next) return;
+      const state = verifyPoolMembership(next, assignment.member, assignment.poolId);
+      setNotice(
+        t(state === 'pending' ? 'account_pools.config_saved' : 'account_pools.member_saved')
+      );
     } catch (failure) {
-      if (alive.current) {
-        reportError(failure);
-        setAssignment(null);
-      }
+      mutationFailed(failure);
+      if (alive.current) setAssignment(null);
     } finally {
-      if (alive.current) setSaving(false);
+      endMutation();
+    }
+  };
+  const remove = async () => {
+    if (
+      !snapshot ||
+      !deleting ||
+      dirty ||
+      poolRemovalBlockers(snapshot, deleting).length ||
+      !beginMutation()
+    )
+      return;
+    try {
+      await connection.saveConfig(
+        snapshot.etag,
+        poolConfigPatch(removePoolFromDraft(snapshot.draft, deleting))
+      );
+      if (!alive.current) return;
+      useConfigStore.getState().clearCache();
+      setDeleting(null);
+      const next = await load();
+      if (!next) return;
+      if (next.draft.settings.pools.some((pool) => pool.id === deleting)) {
+        mutationFailed({ apiCode: 'membership_not_confirmed' });
+        return;
+      }
+      if (filter === deleting) setFilter('*');
+      setNotice(t('account_pools.deleted'));
+    } catch (failure) {
+      mutationFailed(failure);
+      if (alive.current) setDeleting(null);
+    } finally {
+      endMutation();
     }
   };
   const pools = snapshot?.draft.settings.pools || [];
-  const rows: (PoolMember | ConfigPoolMember)[] = snapshot
-    ? [
-        ...snapshot.members.filter((member) => member.source !== 'config'),
-        ...snapshot.configMembers,
-      ]
-    : [];
-  const filtered = rows.filter((member) => {
-    const pool = 'family' in member ? member.poolId : member.pool_id;
-    return (
-      (filter === '*' || pool === filter) &&
-      `${member.name} ${'family' in member ? member.family : member.provider}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
-    );
-  });
+  const rows = snapshot ? poolMemberRows(snapshot) : [];
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    const id = 'family' in row ? row.poolId : row.pool_id;
+    counts[id] = (counts[id] || 0) + 1;
+  }
   const options = [
     { value: '', label: t('account_pools.unassigned') },
     ...pools.filter((pool) => pool.enabled).map((pool) => ({ value: pool.id, label: pool.name })),
   ];
+  const deleteBlockers =
+    snapshot && deleting
+      ? [...(dirty ? ['save_first'] : []), ...poolRemovalBlockers(snapshot, deleting)]
+      : [];
+  const showMembers = (id: string) => {
+    setFilter(id);
+    setTab('members');
+  };
 
   return (
     <div className={styles.page}>
@@ -235,7 +303,6 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
           {t('account_pools.refresh')}
         </Button>
       </header>
-      <p className={styles.info}>{t('account_pools.scope_hint')}</p>
       {connected && (
         <PoolRuntimeBanner
           runtime={runtime}
@@ -248,6 +315,9 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
           {t(`account_pools.${error}`)}
         </div>
       )}
+      {needsRefresh && snapshot && (
+        <p className={styles.info}>{t('account_pools.reload_before_retry')}</p>
+      )}
       {notice && (
         <div role="status" className={styles.info}>
           {notice}
@@ -257,114 +327,107 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
       {!connected && <p role="alert">{t('account_pools.disconnected')}</p>}
       {snapshot && draft && (
         <>
-          <PoolControls
-            draft={draft}
-            savedIds={pools.map((pool) => pool.id)}
-            disabled={disabled}
-            apiBase={apiBase}
-            onChange={setDraft}
-          />
-          <ClientControls draft={draft} disabled={disabled} onChange={setDraft} />
-          <div className={styles.saveBar}>
-            <span>{t(dirty ? 'account_pools.unsaved' : 'account_pools.no_changes')}</span>
-            <Button
-              disabled={disabled || !dirty}
-              onClick={() => {
-                const access = snapshot.config.access as { 'api-keys'?: unknown } | undefined;
-                const invalid = validatePoolDraft(draft, access?.['api-keys']);
-                if (invalid) {
-                  notify(t(`account_pools.${invalid}`), 'error');
-                  return;
-                }
-                setReview(true);
-              }}
-            >
-              {t('account_pools.review_save')}
-            </Button>
+          <div className={styles.summary}>
+            <span>
+              <b>{pools.length}</b> {t('account_pools.pools')}
+            </span>
+            <span>
+              <b>{rows.length}</b> {t('account_pools.accounts_unit')}
+            </span>
+            <button type="button" onClick={() => showMembers('')}>
+              <b>{counts[''] || 0}</b> {t('account_pools.unassigned')}
+            </button>
           </div>
-          <Card title={t('account_pools.members')}>
-            <div className={styles.stack}>
-              <p className="hint">{t('account_pools.members_hint')}</p>
-              {dirty && <p className={styles.info}>{t('account_pools.save_first')}</p>}
-              <div className={styles.filters}>
-                <Input
-                  label={t('account_pools.search')}
-                  value={search}
-                  onChange={(event) => {
-                    setSearch(event.target.value);
-                    setLimit(40);
-                  }}
-                />
-                <Select
-                  ariaLabel={t('account_pools.filter')}
-                  value={filter}
-                  onChange={(value) => {
-                    setFilter(value);
-                    setLimit(40);
-                  }}
-                  options={[
-                    { value: '*', label: t('account_pools.all_members') },
-                    { value: '', label: t('account_pools.unassigned') },
-                    ...pools.map((pool) => ({ value: pool.id, label: pool.name })),
-                  ]}
-                />
-              </div>
-              <p>{t('account_pools.member_count', { count: filtered.length })}</p>
-              {filtered.slice(0, limit).map((member) => {
-                const configMember = 'family' in member;
-                const poolId = configMember ? member.poolId : member.pool_id;
-                const runtime = configMember
-                  ? snapshot.members.find((item) => item.auth_index === member.authIndex)
-                  : member;
-                const mismatch = configMember && (!runtime || runtime.pool_id !== poolId);
-                const key = configMember
-                  ? `${member.family}:${member.group}:${member.key}`
-                  : member.id;
-                return (
-                  <div className={styles.member} key={key}>
-                    <div>
-                      <strong>{member.name}</strong>
-                      <small>
-                        {configMember ? member.family : member.provider}
-                        {' · '}
-                        {t(
-                          configMember
-                            ? 'account_pools.source_config'
-                            : 'account_pools.source_credential'
-                        )}
-                      </small>
-                      <small>
-                        {t('account_pools.current_pool')}:{' '}
-                        <code>{poolId || t('account_pools.unassigned')}</code>
-                      </small>
-                      {runtime?.disabled && <small>{t('account_pools.disabled_member')}</small>}
-                      {mismatch && (
-                        <small role="status" className={styles.pending}>
-                          {t('account_pools.pending', {
-                            pool: runtime?.pool_id || t('account_pools.unassigned'),
-                          })}
-                        </small>
-                      )}
-                    </div>
-                    <Button
-                      variant="secondary"
-                      disabled={disabled || dirty || (!configMember && member.source === 'plugin')}
-                      aria-label={`${t('account_pools.assign')} ${member.name}`}
-                      onClick={() => setAssignment({ member, poolId })}
-                    >
-                      {t('account_pools.assign')}
-                    </Button>
-                  </div>
-                );
-              })}
-              {!filtered.length && <p>{t('account_pools.empty_members')}</p>}
-              {filtered.length > limit && (
-                <Button variant="secondary" onClick={() => setLimit(limit + 40)}>
-                  {t('account_pools.more')}
+          <div className={styles.tabs} role="tablist" aria-label={t('account_pools.title')}>
+            {tabs.map((name, index) => (
+              <button
+                type="button"
+                key={name}
+                ref={(node) => {
+                  tabRefs.current[index] = node;
+                }}
+                id={`pool-tab-${name}`}
+                role="tab"
+                aria-selected={tab === name}
+                aria-controls={`pool-panel-${name}`}
+                tabIndex={tab === name ? 0 : -1}
+                onClick={() => setTab(name)}
+                onKeyDown={(event) => {
+                  let next: number;
+                  if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+                  else if (event.key === 'ArrowLeft')
+                    next = (index - 1 + tabs.length) % tabs.length;
+                  else if (event.key === 'Home') next = 0;
+                  else if (event.key === 'End') next = tabs.length - 1;
+                  else return;
+                  event.preventDefault();
+                  setTab(tabs[next]);
+                  tabRefs.current[next]?.focus();
+                }}
+              >
+                {t(`account_pools.tab_${name}`)}
+              </button>
+            ))}
+          </div>
+          <section
+            className={styles.stack}
+            id={`pool-panel-${tab}`}
+            role="tabpanel"
+            aria-labelledby={`pool-tab-${tab}`}
+          >
+            {tab === 'pools' && (
+              <PoolControls
+                draft={draft}
+                savedIds={pools.map((pool) => pool.id)}
+                disabled={writeDisabled}
+                apiBase={apiBase}
+                counts={counts}
+                onChange={setDraft}
+                onDelete={setDeleting}
+                onMembers={showMembers}
+              />
+            )}
+            {tab === 'members' && (
+              <PoolMembers
+                snapshot={snapshot}
+                filter={filter}
+                onFilter={setFilter}
+                disabled={writeDisabled}
+                dirty={dirty}
+                onAssign={(member, poolId) => setAssignment({ member, poolId })}
+              />
+            )}
+            {tab === 'access' && (
+              <ClientControls draft={draft} disabled={writeDisabled} onChange={setDraft} />
+            )}
+            {tab === 'settings' && (
+              <PoolSettings draft={draft} disabled={writeDisabled} onChange={setDraft} />
+            )}
+          </section>
+          {dirty && (
+            <div className={styles.saveBar}>
+              <span>{t('account_pools.unsaved')}</span>
+              <div className={styles.actions}>
+                <Button variant="ghost" disabled={disabled} onClick={refresh}>
+                  {t('account_pools.discard')}
                 </Button>
-              )}
+                <Button
+                  disabled={writeDisabled}
+                  onClick={() => {
+                    const access = snapshot.config.access as { 'api-keys'?: unknown } | undefined;
+                    const invalid = validatePoolDraft(draft, access?.['api-keys']);
+                    if (invalid) {
+                      notify(t(`account_pools.${invalid}`), 'error');
+                      return;
+                    }
+                    setReview(true);
+                  }}
+                >
+                  {t('account_pools.review_save')}
+                </Button>
+              </div>
             </div>
-          </Card>
+          )}
         </>
       )}
       <Modal
@@ -377,7 +440,7 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
             <Button variant="secondary" disabled={saving} onClick={() => setReview(false)}>
               {t('account_pools.cancel')}
             </Button>
-            <Button loading={saving} onClick={() => void save()}>
+            <Button loading={saving} disabled={writeDisabled} onClick={() => void save()}>
               {t('account_pools.save')}
             </Button>
           </>
@@ -406,7 +469,11 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
             </Button>
             <Button
               loading={saving}
-              disabled={!assignment || !options.some((item) => item.value === assignment.poolId)}
+              disabled={
+                writeDisabled ||
+                !assignment ||
+                !options.some((item) => item.value === assignment.poolId)
+              }
               onClick={() => void assign()}
             >
               {t('account_pools.save')}
@@ -417,6 +484,7 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
         {assignment && (
           <div className={styles.stack}>
             <strong>{assignment.member.name}</strong>
+            {!('family' in assignment.member) && <code>{assignment.member.id}</code>}
             <Select
               ariaLabel={t('account_pools.select_pool')}
               value={assignment.poolId}
@@ -433,6 +501,55 @@ function PoolWorkspace({ apiBase, connected }: { apiBase: string; connected: boo
             </p>
           </div>
         )}
+      </Modal>
+      <Modal
+        open={Boolean(deleting)}
+        title={t('account_pools.delete_pool')}
+        onClose={() => setDeleting(null)}
+        closeDisabled={saving}
+        footer={
+          <>
+            <Button variant="secondary" disabled={saving} onClick={() => setDeleting(null)}>
+              {t('account_pools.cancel')}
+            </Button>
+            <Button
+              variant="danger"
+              loading={saving}
+              disabled={writeDisabled || deleteBlockers.length > 0}
+              onClick={() => void remove()}
+            >
+              {t('account_pools.delete_pool')}
+            </Button>
+          </>
+        }
+      >
+        <div className={styles.stack}>
+          <strong>
+            {pools.find((pool) => pool.id === deleting)?.name} <code>{deleting}</code>
+          </strong>
+          <p>{t('account_pools.delete_hint')}</p>
+          {deleteBlockers.length ? (
+            <div role="alert" className={styles.info}>
+              {deleteBlockers.map((reason) => (
+                <p key={reason}>{t(`account_pools.${reason}`)}</p>
+              ))}
+            </div>
+          ) : (
+            <p className={styles.info}>{t('account_pools.delete_grants_hint')}</p>
+          )}
+          {deleteBlockers.includes('pool_not_empty') && (
+            <Button
+              variant="secondary"
+              disabled={saving}
+              onClick={() => {
+                if (deleting) showMembers(deleting);
+                setDeleting(null);
+              }}
+            >
+              {t('account_pools.view_members')}
+            </Button>
+          )}
+        </div>
       </Modal>
     </div>
   );
