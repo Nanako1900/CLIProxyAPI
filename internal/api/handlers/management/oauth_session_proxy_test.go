@@ -93,9 +93,23 @@ func (s *proxyTestCodexOAuthService) CreateTokenStorage(bundle *codex.CodexAuthB
 
 func startForwardSOCKSProxy(t *testing.T, hits *atomic.Int32, expectedProxyAuth string, dropBody bool) *httptest.Server {
 	t.Helper()
-	return newOAuthSOCKSTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits.Add(1)
+	return newOAuthSOCKSTestServer(t, oauthTestForwardingHandler(t, hits, "", dropBody), expectedProxyAuth)
+}
 
+func startForwardHTTPProxy(t *testing.T, hits *atomic.Int32, expectedProxyAuth string, dropBody bool) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(oauthTestForwardingHandler(t, hits, expectedProxyAuth, dropBody))
+}
+
+func oauthTestForwardingHandler(t *testing.T, hits *atomic.Int32, expectedProxyAuth string, dropBody bool) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if expectedProxyAuth != "" && r.Header.Get("Proxy-Authorization") != expectedProxyAuth {
+			w.Header().Set("Proxy-Authenticate", `Basic realm="proxy"`)
+			http.Error(w, "proxy auth required", http.StatusProxyAuthRequired)
+			return
+		}
 		if dropBody {
 			if hj, ok := w.(http.Hijacker); ok {
 				conn, _, errHijack := hj.Hijack()
@@ -130,7 +144,7 @@ func startForwardSOCKSProxy(t *testing.T, hits *atomic.Int32, expectedProxyAuth 
 		}
 		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
-	}), expectedProxyAuth)
+	})
 }
 
 func waitForOAuthStatus(t *testing.T, router http.Handler, state string) oauthStatusResponse {

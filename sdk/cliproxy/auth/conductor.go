@@ -91,6 +91,10 @@ type Result struct {
 	SkipQuotaObservation bool
 	// AccessToken captures the active access token under which the request was executed.
 	AccessToken string
+	// RefreshToken captures the refresh credential associated with the request,
+	// used to distinguish a same-account OAuth token rotation from a genuine
+	// credential replacement when evaluating result staleness.
+	RefreshToken string
 	// CredentialVersion captures the credential version under which the request was executed.
 	CredentialVersion uint64
 	// RegistrationEpoch captures the registration epoch under which the request was executed.
@@ -175,6 +179,7 @@ type Manager struct {
 	poolActive                map[string]int
 	poolMoving                map[string]bool
 	poolSelectors             map[string]Selector
+	inFlightTracker           *inFlightTracker
 	store                     Store
 	cooldownStore             CooldownStateStore
 	pendingCooldownStateStore CooldownStateStore
@@ -272,6 +277,7 @@ func NewManager(store Store, selector Selector, hook Hook) *Manager {
 		hook = NoopHook{}
 	}
 	manager := &Manager{
+		inFlightTracker:       newInFlightTracker(),
 		store:                 store,
 		authLoadGate:          semaphore.NewWeighted(math.MaxInt64),
 		executors:             make(map[string]ProviderExecutor),

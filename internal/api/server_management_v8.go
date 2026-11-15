@@ -52,6 +52,7 @@ func (s *Server) registerManagementV8Routes() {
 	v8.GET("/observability/usage/accounts/:id/requests", s.mgmt.GetUsageAccountRequests)
 	v8.GET("/observability/usage/status", s.mgmt.GetUsageAccountingStatus)
 	v8.POST("/observability/usage/pricing/refresh", s.mgmt.RefreshUsagePrices)
+	v8.GET("/observability/requests/in-flight", s.mgmt.GetInFlightRequests)
 
 	v8.GET("/credentials/pool", s.mgmt.GetCredentialPool)
 	v8.GET("/account-pools/credentials", s.mgmt.ListPoolCredentials)
