@@ -10,7 +10,7 @@ import (
 )
 
 func TestApplyThinkingNativeResponsesValidatesEffort(t *testing.T) {
-	for _, model := range []string{"gpt-6-sol", "gpt-6.1-sol"} {
+	for _, model := range []string{"gpt-6-sol", "gpt-6.1-sol", "gpt-6.2-sol", "gpt-6.2-astra"} {
 		for _, format := range []string{"openai-response", "codex"} {
 			for _, tc := range []struct {
 				name   string
