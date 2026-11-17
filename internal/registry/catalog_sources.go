@@ -290,6 +290,12 @@ func catalogFetcherWithSource(embedded []byte, urls []string, validate func([]by
 		for _, candidate := range sources {
 			data, errRead := readCatalogSource(ctx, candidate)
 			if errRead == nil && validate(data) == nil {
+				if source == "" {
+					data, errRead = MergeCodex62CatalogFallbacks(data, embedded)
+					if errRead != nil {
+						return nil, candidate, errRead
+					}
+				}
 				return data, candidate, nil
 			}
 			if ctx.Err() != nil {
