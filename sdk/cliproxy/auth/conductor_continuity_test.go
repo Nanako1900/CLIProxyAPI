@@ -107,6 +107,48 @@ type codexQuotaRejectionErr struct {
 	transient        bool
 }
 
+func TestCodexContinuityCandidatesRespectAccountPoolStrategy(t *testing.T) {
+	for _, testCase := range []struct {
+		name         string
+		global       Selector
+		poolStrategy string
+		wantZero     bool
+	}{
+		{name: "weighted pool overrides global round robin", global: &RoundRobinSelector{}, poolStrategy: "weighted-round-robin"},
+		{name: "round robin pool overrides global weighted", global: &WeightedRoundRobinSelector{}, poolStrategy: "round-robin", wantZero: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			manager := NewManager(nil, testCase.global, nil)
+			t.Cleanup(manager.StopAutoRefresh)
+			cfg := poolTestConfig()
+			cfg.AccountPools.Pools[0].Strategy = testCase.poolStrategy
+			manager.SetConfig(cfg)
+			manager.RegisterExecutor(&continuityTestExecutor{provider: "codex"})
+			for _, item := range []struct{ id, poolID, weight string }{
+				{"pool-positive", "basic", "1"},
+				{"pool-zero", "basic", "0"},
+				{"foreign-positive", "premium", "1"},
+			} {
+				_, errRegister := manager.Register(context.Background(), &Auth{
+					ID: item.id, Provider: "codex", Status: StatusActive, PoolID: item.poolID,
+					Metadata: map[string]any{"pool_id": item.poolID}, Attributes: map[string]string{AttributeWeight: item.weight},
+				})
+				if errRegister != nil {
+					t.Fatal(errRegister)
+				}
+			}
+			candidates := manager.buildCodexContinuityCandidates(poolTestContext("basic"), []string{"codex"}, "", cliproxyexecutor.Options{}, 0, false, 0, time.Now())
+			seen := make(map[string]bool)
+			for _, candidate := range candidates {
+				seen[candidate.ID] = true
+			}
+			if !seen["pool-positive"] || seen["foreign-positive"] || seen["pool-zero"] != testCase.wantZero {
+				t.Fatalf("candidates = %v, want positive account and zero-weight account = %t in basic pool only", seen, testCase.wantZero)
+			}
+		})
+	}
+}
+
 func (e codexQuotaRejectionErr) Error() string              { return e.msg }
 func (e codexQuotaRejectionErr) StatusCode() int            { return e.status }
 func (e codexQuotaRejectionErr) IsCredentialScoped() bool   { return e.credentialScoped }
