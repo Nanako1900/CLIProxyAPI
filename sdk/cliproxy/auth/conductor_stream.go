@@ -3,6 +3,7 @@ package auth
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -484,6 +485,9 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 				warnLogUpstreamFailure(ctx, entry, provider, execModel, auth, durationStream, errStream)
 			}
 		}
+		if errors.Is(errStream, errClaudePlanChanged) {
+			return nil, errStream
+		}
 		if !ephemeralResult {
 			if errCancel := claudeOAuthRequestCancellation(ctx, auth, errStream); errCancel != nil {
 				return nil, errCancel
@@ -546,6 +550,9 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 					executionSeq = m.nextExecutionSeq()
 					startRetry := time.Now()
 					retryStream, retryErr := m.streamInPool(ctx, executor, auth, execReq, execOpts)
+					if errors.Is(retryErr, errClaudePlanChanged) {
+						return nil, retryErr
+					}
 					retryErr = markUpstreamExecutionAttemptFromContext(ctx, retryErr)
 					retryStream, retryErr = validateStreamResult(retryStream, retryErr)
 					retryErr = markUpstreamExecutionAttemptFromContext(ctx, retryErr)

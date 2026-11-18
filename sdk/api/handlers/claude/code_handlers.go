@@ -608,6 +608,12 @@ func (h *ClaudeCodeAPIHandler) toClaudeErrorWithRetryAfter(msg *interfaces.Error
 			Message: message,
 		},
 	}
+	if msg != nil {
+		if ae, ok := errors.AsType[*coreauth.Error](msg.Error); ok && ae.Code == coreauth.ErrorCodePoolModelNotSupported {
+			response.Error.Message = ae.Message
+			response.Error.Details = &claudeErrorDetails{ErrorCode: ae.Code}
+		}
+	}
 	if clienterror.IsClaudeThreadNotFound(status, errors.New(errText)) {
 		response.Error.Details = &claudeErrorDetails{ErrorCode: "thread_not_found"}
 	}

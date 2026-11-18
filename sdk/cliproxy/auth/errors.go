@@ -151,7 +151,7 @@ func (e *Error) StatusCode() int {
 // IsRequestScoped reports whether the failure is tied to the current request
 // rather than the selected credential.
 func (e *Error) IsRequestScoped() bool {
-	return e != nil && e.Code == ErrorCodeRequestScoped
+	return e != nil && (e.Code == ErrorCodeRequestScoped || e.Code == ErrorCodePoolModelNotSupported)
 }
 
 // MarkRequestScoped marks the error as request-scoped in place and returns it.

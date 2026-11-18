@@ -38,6 +38,9 @@ type ClaudeTokenStorage struct {
 	// OrganizationUUID identifies the Anthropic organization returned by OAuth.
 	OrganizationUUID string `json:"organization_uuid,omitempty"`
 
+	// PlanType is the subscription reported by the OAuth profile.
+	PlanType string `json:"plan_type,omitempty"`
+
 	// OrganizationName is the display name returned by OAuth.
 	OrganizationName string `json:"organization_name,omitempty"`
 

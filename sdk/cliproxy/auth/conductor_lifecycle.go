@@ -801,6 +801,11 @@ func (m *Manager) updateInternalLocked(ctx context.Context, base, auth *Auth, mo
 	forgetGen := authClone.Generation
 	m.mu.Unlock()
 	_ = schedulerSnapshot
+	// Refresh publishes all projections after committing its result. A plan changed
+	// by preparation or a local credential edit must update the catalog too.
+	if mode != updateModeRefresh && claudeFableAllowed(existingBeforeSave) != claudeFableAllowed(auth) {
+		m.projectAuthModels(auth, now)
+	}
 	if shouldForgetWeighted {
 		m.forgetWeightedAuthUpTo(authClone.ID, forgetEpoch, forgetGen)
 	}

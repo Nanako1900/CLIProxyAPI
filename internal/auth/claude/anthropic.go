@@ -21,6 +21,9 @@ type ClaudeTokenData struct {
 	AccountUUID string `json:"account_uuid"`
 	// OrganizationUUID identifies the Anthropic organization returned by OAuth.
 	OrganizationUUID string `json:"organization_uuid"`
+	// PlanType is the subscription reported by the OAuth profile.
+	PlanType string `json:"plan_type,omitempty"`
+
 	// OrganizationName is the display name returned by OAuth.
 	OrganizationName string `json:"organization_name"`
 	// Expire is the timestamp of the token expiry.

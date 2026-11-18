@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/pluginhost"
@@ -291,5 +292,58 @@ func TestAccountPoolHTTPDispatchStaysInsidePool(t *testing.T) {
 		if id != "http-basic" || e.scopes[i] != "basic" {
 			t.Fatalf("pool escape: calls=%v scopes=%v", e.calls, e.scopes)
 		}
+	}
+}
+
+type poolClaudeHTTPExecutor struct{ poolHTTPExecutor }
+
+func (*poolClaudeHTTPExecutor) Identifier() string { return "claude" }
+
+// The only Fable-capable credential is outside the client's pool.
+func TestAccountPoolClaudeFableCapabilityResponse(t *testing.T) {
+	server := newTestServerWithConfig(t, testServerPoolConfig())
+	m := server.handlers.AuthManager
+	e := new(poolClaudeHTTPExecutor)
+	m.RegisterExecutor(e)
+	const model = "claude-fable-5-pool-test"
+	const sonnet = "claude-sonnet-pool-test"
+	reg := registry.GetGlobalRegistry()
+	for _, item := range []struct{ id, pool, plan string }{{"http-claude-pro", "basic", "pro"}, {"http-claude-max", "premium", "max"}} {
+		ctx := context.Background()
+		if _, err := m.Register(ctx, &coreauth.Auth{ID: item.id, Provider: "claude", PoolID: item.pool, Status: coreauth.StatusActive, Metadata: map[string]any{"plan_type": item.plan}}); err != nil {
+			t.Fatal(err)
+		}
+		reg.RegisterClient(item.id, "claude", []*registry.ModelInfo{{ID: model, Object: "model"}, {ID: sonnet, Object: "model"}})
+		t.Cleanup(func() { reg.UnregisterClient(item.id) })
+		m.ReconcileRegistryModelStates(ctx, item.id)
+	}
+	perform := func(method, route, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/pools/basic/v1/"+route, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer pool-client-key")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		server.engine.ServeHTTP(rec, req)
+		return rec
+	}
+	catalog := perform(http.MethodGet, "models", "")
+	if catalog.Code != http.StatusOK || strings.Contains(catalog.Body.String(), model) || !strings.Contains(catalog.Body.String(), sonnet) {
+		t.Fatalf("unexpected basic catalog: %d %s", catalog.Code, catalog.Body.String())
+	}
+	for _, tc := range []struct {
+		route, codePath string
+		stream          bool
+	}{
+		{"messages", "error.details.error_code", false}, {"messages", "error.details.error_code", true},
+		{"messages/count_tokens", "error.details.error_code", false}, {"chat/completions", "error.code", false}, {"chat/completions", "error.code", true},
+	} {
+		rec := perform(http.MethodPost, tc.route, fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"test"}],"stream":%t}`, model, tc.stream))
+		code := ojson.GetBytesNoCopy(rec.Body.Bytes(), tc.codePath).String()
+		msg := ojson.GetBytesNoCopy(rec.Body.Bytes(), "error.message").String()
+		if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "" || code != coreauth.ErrorCodePoolModelNotSupported || !strings.Contains(msg, "Claude Fable") {
+			t.Errorf("%s stream=%t: %d %s %s", tc.route, tc.stream, rec.Code, rec.Header(), rec.Body.String())
+		}
+	}
+	if len(e.calls) != 0 {
+		t.Fatalf("unsupported requests reached executor: %v", e.calls)
 	}
 }

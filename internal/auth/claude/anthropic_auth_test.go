@@ -91,7 +91,7 @@ func TestExchangeCodeForTokensPersistsUpstreamAccountAndDevicePool(t *testing.T)
 				case ProfileURL:
 					return jsonResponse(req, `{
 						"account":{"uuid":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","email":"user@example.com"},
-						"organization":{"uuid":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","name":"Example Org"}
+						"organization":{"uuid":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","name":"Example Org","organization_type":"claude_pro"}
 					}`), nil
 				case RolesURL:
 					return jsonResponse(req, `{"roles":[]}`), nil
@@ -117,6 +117,9 @@ func TestExchangeCodeForTokensPersistsUpstreamAccountAndDevicePool(t *testing.T)
 		t.Fatalf("device pool length = %d, want %d", len(bundle.DeviceIDs), ClaudeDevicePoolSize)
 	}
 	storage := auth.CreateTokenStorage(bundle)
+	if bundle.TokenData.PlanType != "pro" || storage.PlanType != "pro" {
+		t.Fatalf("OAuth plan not persisted: bundle=%q storage=%q", bundle.TokenData.PlanType, storage.PlanType)
+	}
 	if storage.AccountUUID != bundle.TokenData.AccountUUID || storage.OrganizationUUID != bundle.TokenData.OrganizationUUID {
 		t.Fatalf("storage account identity = %#v, want bundle identity", storage)
 	}
@@ -529,7 +532,7 @@ func TestRefreshTokensUsesNative220ControlPlaneShape(t *testing.T) {
 					return &http.Response{
 						StatusCode: http.StatusOK,
 						Body: io.NopCloser(strings.NewReader(`{
-							"account":{"uuid":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","email":"shared@example.com"},
+							"account":{"uuid":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","email":"shared@example.com","has_claude_max":true},
 							"organization":{"uuid":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","name":"Shared Org"}
 						}`)),
 						Header:  make(http.Header),
@@ -546,6 +549,9 @@ func TestRefreshTokensUsesNative220ControlPlaneShape(t *testing.T) {
 	tokenData, errRefresh := auth.RefreshTokens(t.Context(), refreshToken)
 	if errRefresh != nil {
 		t.Fatalf("RefreshTokens() error = %v", errRefresh)
+	}
+	if tokenData.PlanType != "max" {
+		t.Fatalf("refreshed plan = %q, want max", tokenData.PlanType)
 	}
 	if tokenData.RefreshToken != refreshToken {
 		t.Fatalf("refresh token fallback = %q, want original placeholder", tokenData.RefreshToken)
@@ -609,6 +615,7 @@ func TestFetchOAuthProfile(t *testing.T) {
 func TestUpdateTokenStoragePreservesAccountWhenRefreshOmitsIt(t *testing.T) {
 	storage := &ClaudeTokenStorage{
 		Email:            "user@example.com",
+		PlanType:         "max",
 		AccountUUID:      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		OrganizationUUID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
 		OrganizationName: "Example Org",
@@ -619,6 +626,9 @@ func TestUpdateTokenStoragePreservesAccountWhenRefreshOmitsIt(t *testing.T) {
 		Expire:       "2099-01-01T00:00:00Z",
 	})
 
+	if storage.PlanType != "max" {
+		t.Errorf("plan = %q, want preserved", storage.PlanType)
+	}
 	if storage.Email != "user@example.com" {
 		t.Fatalf("email = %q, want preserved", storage.Email)
 	}

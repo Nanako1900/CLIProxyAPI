@@ -89,14 +89,20 @@ func (m *Manager) checkPoolScope(ctx context.Context) error {
 
 // admitPool revalidates a selected snapshot and fences membership changes for the
 // lifetime of the upstream operation. It never holds m.mu over network I/O.
-func (m *Manager) admitPool(ctx context.Context, selected *Auth) (func(), error) {
+func (m *Manager) admitPool(ctx context.Context, selected *Auth, upstreamModel string) (func(), error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.checkPoolScope(ctx); err != nil {
 		return nil, err
 	}
 	scope, scoped := pool.FromContext(ctx)
+	planMismatch := func() bool {
+		return selected != nil && strings.EqualFold(selected.Provider, "claude") && isClaudeFableModel(upstreamModel) && (!claudeFableAllowed(selected) || !claudeFableAllowed(m.auths[selected.ID]))
+	}
 	if !scoped {
+		if !m.HomeEnabled() && planMismatch() {
+			return nil, errClaudePlanChanged
+		}
 		return func() {}, nil
 	}
 	if selected == nil {
@@ -106,6 +112,9 @@ func (m *Manager) admitPool(ctx context.Context, selected *Auth) (func(), error)
 	if m.poolMoving[selected.ID] || current == nil || current.AccountPoolID() != scope.ID || current.Disabled ||
 		current.RegistrationEpoch != selected.RegistrationEpoch {
 		return nil, &poolError{"pinned_auth_scope_conflict", http.StatusConflict}
+	}
+	if planMismatch() {
+		return nil, errClaudePlanChanged
 	}
 	if m.poolActive == nil {
 		m.poolActive = make(map[string]int)
@@ -128,7 +137,7 @@ func (m *Manager) executeInPool(ctx context.Context, target ProviderExecutor, a 
 	if err := checkPoolRequest(ctx, req); err != nil {
 		return executor.Response{}, err
 	}
-	release, err := m.admitPool(ctx, a)
+	release, err := m.admitPool(ctx, a, req.Model)
 	if err != nil {
 		return executor.Response{}, err
 	}
@@ -141,7 +150,7 @@ func (m *Manager) countInPool(ctx context.Context, target ProviderExecutor, a *A
 	if err := checkPoolRequest(ctx, req); err != nil {
 		return executor.Response{}, err
 	}
-	release, err := m.admitPool(ctx, a)
+	release, err := m.admitPool(ctx, a, req.Model)
 	if err != nil {
 		return executor.Response{}, err
 	}
@@ -154,7 +163,7 @@ func (m *Manager) streamInPool(ctx context.Context, target ProviderExecutor, a *
 	if err := checkPoolRequest(ctx, req); err != nil {
 		return nil, err
 	}
-	release, err := m.admitPool(ctx, a)
+	release, err := m.admitPool(ctx, a, req.Model)
 	if err != nil {
 		return nil, err
 	}

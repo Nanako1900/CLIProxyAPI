@@ -163,13 +163,36 @@ type authorizationCodeExchangeRequest struct {
 // OAuthProfile is the account identity returned by Anthropic's OAuth profile endpoint.
 type OAuthProfile struct {
 	Account struct {
-		UUID  string `json:"uuid"`
-		Email string `json:"email"`
+		UUID         string `json:"uuid"`
+		Email        string `json:"email"`
+		HasClaudeMax *bool  `json:"has_claude_max"`
+		HasClaudePro *bool  `json:"has_claude_pro"`
 	} `json:"account"`
 	Organization struct {
 		UUID string `json:"uuid"`
 		Name string `json:"name"`
+		Type string `json:"organization_type"`
 	} `json:"organization"`
+}
+
+// SubscriptionPlan returns an entitlement signal, never the organization's display name.
+// An absent profile field is distinct from explicitly losing subscription access.
+func (p *OAuthProfile) SubscriptionPlan() string {
+	plan := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(p.Organization.Type)), "claude_")
+	switch plan {
+	case "pro", "max", "team", "enterprise", "free":
+		return plan
+	}
+	if p.Account.HasClaudeMax != nil && *p.Account.HasClaudeMax {
+		return "max"
+	}
+	if p.Account.HasClaudePro != nil && *p.Account.HasClaudePro {
+		return "pro"
+	}
+	if plan == "" && (p.Account.HasClaudeMax != nil || p.Account.HasClaudePro != nil) {
+		return "unknown"
+	}
+	return plan
 }
 
 // ClaudeAuth handles Anthropic OAuth2 authentication flow.
@@ -456,6 +479,7 @@ func (o *ClaudeAuth) ExchangeCodeForTokens(ctx context.Context, code, state stri
 	// Replay the native login companion lookups and let the profile response win
 	// where it carries identity the token response omitted.
 	if profile := o.inspectOAuthAccount(ctx, tokenResp.AccessToken); profile != nil {
+		tokenData.PlanType = profile.SubscriptionPlan()
 		if value := strings.TrimSpace(profile.Account.UUID); value != "" {
 			tokenData.AccountUUID = value
 		}
@@ -597,6 +621,7 @@ func (o *ClaudeAuth) refreshTokensSingleFlight(ctx context.Context, refreshToken
 		log.Warnf("fetch Claude OAuth profile after refresh: %v", errProfile)
 		return tokenData, nil
 	}
+	tokenData.PlanType = profile.SubscriptionPlan()
 	tokenData.Email = profile.Account.Email
 	tokenData.AccountUUID = profile.Account.UUID
 	tokenData.OrganizationUUID = profile.Organization.UUID
@@ -622,6 +647,7 @@ func (o *ClaudeAuth) CreateTokenStorage(bundle *ClaudeAuthBundle) *ClaudeTokenSt
 		AccountUUID:      bundle.TokenData.AccountUUID,
 		OrganizationUUID: bundle.TokenData.OrganizationUUID,
 		OrganizationName: bundle.TokenData.OrganizationName,
+		PlanType:         bundle.TokenData.PlanType,
 		DeviceIDs:        append([]string(nil), bundle.DeviceIDs...),
 		Expire:           bundle.TokenData.Expire,
 	}
@@ -691,6 +717,9 @@ func (o *ClaudeAuth) UpdateTokenStorage(storage *ClaudeTokenStorage, tokenData *
 	}
 	if tokenData.OrganizationName != "" {
 		storage.OrganizationName = tokenData.OrganizationName
+	}
+	if tokenData.PlanType != "" {
+		storage.PlanType = tokenData.PlanType
 	}
 	storage.Expire = tokenData.Expire
 }

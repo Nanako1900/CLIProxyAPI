@@ -5,6 +5,7 @@ package handlers
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -147,6 +148,9 @@ func BuildErrorResponseBodyWithError(status int, errText string, err error) []by
 		}
 	}
 
+	if ae, ok := errors.AsType[*coreauth.Error](err); ok && ae.Code == coreauth.ErrorCodePoolModelNotSupported {
+		code, errText = ae.Code, ae.Message
+	}
 	payload, errMarshal := json.Marshal(ErrorResponse{
 		Error: ErrorDetail{
 			Message: errText,

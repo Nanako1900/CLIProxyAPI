@@ -219,6 +219,21 @@ func (m *Manager) selectionModelKeyForAuth(auth *Auth, routeModel string) string
 	return canonicalModelKey(m.selectionModelForAuth(auth, routeModel))
 }
 
+func (m *Manager) projectAuthModels(snapshot *Auth, now time.Time) {
+	reg := registry.GetGlobalRegistry()
+	supportedModels, regEpoch := reg.GetModelsAndEpochForClient(snapshot.ID)
+	projections := make([]registry.ClientModelProjection, 0, len(supportedModels))
+	for _, sm := range supportedModels {
+		if sm == nil || strings.TrimSpace(sm.ID) == "" {
+			continue
+		}
+		projections = append(projections, m.clientModelProjectionForAuth(snapshot, sm.ID, now))
+	}
+	if len(projections) > 0 {
+		reg.ApplyClientModelProjections(snapshot.ID, regEpoch, snapshot.Generation, projections)
+	}
+}
+
 func (m *Manager) clientModelProjectionForAuth(auth *Auth, routeModel string, now time.Time) registry.ClientModelProjection {
 	targetModel := strings.TrimSpace(routeModel)
 	if targetModel == "" {
@@ -228,6 +243,11 @@ func (m *Manager) clientModelProjectionForAuth(auth *Auth, routeModel string, no
 		return registry.ClientModelProjection{ModelID: targetModel}
 	}
 
+	// Keep the route registered so an all-Pro pool can report a capability error,
+	// while omitting the account from the available catalog for this model.
+	if m != nil && !m.ClaudePlanAllowsModel(auth, targetModel) {
+		return registry.ClientModelProjection{ModelID: targetModel, Suspended: true, SuspendReason: ErrorCodePoolModelNotSupported}
+	}
 	targetKey := ""
 	if m != nil {
 		targetKey = m.selectionModelKeyForAuth(auth, targetModel)

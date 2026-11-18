@@ -226,6 +226,9 @@ func (h *Handler) RequestAnthropicToken(c *gin.Context) {
 		if tokenStorage.OrganizationUUID != "" {
 			metadata["organization_uuid"] = tokenStorage.OrganizationUUID
 		}
+		if tokenStorage.PlanType != "" {
+			metadata["plan_type"] = tokenStorage.PlanType
+		}
 		if tokenStorage.OrganizationName != "" {
 			metadata["organization_name"] = tokenStorage.OrganizationName
 		}
