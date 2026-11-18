@@ -13,7 +13,6 @@ import (
 	"github.com/MoeForge/moego/json"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codex"
 	internalconfig "github.com/router-for-me/CLIProxyAPI/v8/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	log "github.com/sirupsen/logrus"
 )
@@ -1739,18 +1738,7 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 	if saved == nil {
 		return nil, fmt.Errorf("auth %s not found", id)
 	}
-	targetAuth := saved
-	supportedModels, regEpoch := registry.GetGlobalRegistry().GetModelsAndEpochForClient(id)
-	projections := make([]registry.ClientModelProjection, 0, len(supportedModels))
-	for _, sm := range supportedModels {
-		if sm == nil || strings.TrimSpace(sm.ID) == "" {
-			continue
-		}
-		projections = append(projections, m.clientModelProjectionForAuth(targetAuth, sm.ID, now))
-	}
-	if targetAuth != nil && len(projections) > 0 {
-		registry.GetGlobalRegistry().ApplyClientModelProjections(id, regEpoch, targetAuth.Generation, projections)
-	}
+	m.projectAuthModels(saved, now)
 	return saved.Clone(), nil
 }
 

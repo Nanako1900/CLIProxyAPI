@@ -155,7 +155,7 @@ func TestAccountPoolsAdmissionRevalidatesPolicyAndMembership(t *testing.T) {
 	cfg := poolTestConfig()
 	cfg.PoolClients[0].AllowedPools = []string{"premium"}
 	m.SetConfig(cfg)
-	if release, err := m.admitPool(poolTestContext("basic"), selected); err == nil {
+	if release, err := m.admitPool(poolTestContext("basic"), selected, "pool-test-model"); err == nil {
 		release()
 		t.Fatal("revoked grant admitted")
 	}
@@ -166,11 +166,11 @@ func TestAccountPoolsAdmissionRevalidatesPolicyAndMembership(t *testing.T) {
 	if _, err := m.Update(context.Background(), moved); err != nil {
 		t.Fatal(err)
 	}
-	if release, err := m.admitPool(poolTestContext("basic"), selected); err == nil {
+	if release, err := m.admitPool(poolTestContext("basic"), selected, "pool-test-model"); err == nil {
 		release()
 		t.Fatal("stale selection admitted")
 	}
-	release, err := m.admitPool(poolTestContext("premium"), moved)
+	release, err := m.admitPool(poolTestContext("premium"), moved, "pool-test-model")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestAccountPoolsMoveFencesAdmissionsDuringStorage(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { _, err := m.Update(context.Background(), moved); done <- err }()
 	<-entered
-	if release, err := m.admitPool(poolTestContext("basic"), selected); err == nil {
+	if release, err := m.admitPool(poolTestContext("basic"), selected, "pool-test-model"); err == nil {
 		release()
 		t.Fatal("admitted while membership persistence was in progress")
 	}
@@ -272,7 +272,7 @@ func TestAccountPoolsMoveFencesAdmissionsDuringStorage(t *testing.T) {
 	if current.AccountPoolID() != "basic" {
 		t.Fatal("failed move published membership")
 	}
-	if release, err := m.admitPool(poolTestContext("basic"), current); err == nil {
+	if release, err := m.admitPool(poolTestContext("basic"), current, "pool-test-model"); err == nil {
 		release()
 		t.Fatal("uncertain storage state was not quarantined")
 	}
@@ -297,7 +297,7 @@ func TestAccountPoolsCannotHotDisableIntoGlobalRouting(t *testing.T) {
 func TestAccountPoolsLoadAndFailedRefreshCannotBypassFence(t *testing.T) {
 	m, _ := newPoolTestManager(t)
 	a, _ := m.GetByID("pool-a1")
-	release, err := m.admitPool(poolTestContext("basic"), a)
+	release, err := m.admitPool(poolTestContext("basic"), a, "pool-test-model")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestAccountPoolsLoadAndFailedRefreshCannotBypassFence(t *testing.T) {
 	if _, err = m.UpdateRefreshedAuth(context.Background(), current, current.Clone()); err == nil {
 		t.Fatal("failed refresh cleared quarantine")
 	}
-	if release, err = m.admitPool(poolTestContext("basic"), current); err == nil {
+	if release, err = m.admitPool(poolTestContext("basic"), current, "pool-test-model"); err == nil {
 		release()
 		t.Fatal("quarantine bypassed")
 	}

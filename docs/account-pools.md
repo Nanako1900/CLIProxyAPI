@@ -68,6 +68,22 @@ after restart. The management-only `GET /v8/management/account-pools/status`
 endpoint exposes the startup/configured isolation flags and Home incompatibility
 without credentials, with `Cache-Control: no-store`.
 
+### Claude Fable eligibility
+
+The local router checks the resolved upstream model before selecting an account.
+For `claude-fable` and `claude-fable-*` (including aliases and thinking suffixes),
+Pro and Free subscriptions are skipped without contacting Claude, consuming a
+retry attempt, or cooling down the account. They can still serve other models.
+The scoped model list does not advertise Fable if no member is eligible.
+
+OAuth login and token refresh save `plan_type` when the profile reports it.
+Max is eligible by default. An older OAuth credential or a setup token with no
+known plan is not tried speculatively. Refresh or sign in again to populate the
+plan. For a subscription whose Fable access you have independently confirmed,
+you can set the boolean `claude_fable_enabled: true` in its credential metadata;
+this cannot override a known Pro or Free plan. Set it to `false` to opt out even
+on Max. Ordinary Claude API keys keep their existing model configuration.
+
 ### Diagnosing failed requests
 
 Read the response error code as well as the access-log HTTP status:
@@ -77,6 +93,7 @@ Read the response error code as well as the access-log HTTP status:
 | `400 pool_required` | Use the pool base URL, for example `/pools/kiro/v1` for an OpenAI client or `/pools/kiro` for an Anthropic client. |
 | `503 pool_restart_required` | Restart CPA after changing the isolation switch. Reloading YAML alone is insufficient. |
 | `503 pool_disabled` | Enable the named pool. |
+| `503 pool_model_not_supported` | No candidate in the current pool is entitled to Claude Fable. Choose another model or add an eligible account. This local error does not include `Retry-After`; a real cooldown on an eligible account keeps its usual handling. |
 | `503 pool_no_eligible_accounts` | Check live membership, model support, account availability, and cooldown; an empty pool cannot borrow another pool's accounts. |
 | `501 pool_adapter_unsupported` | Update to the inactive-plugin-host fix, then check for a real plugin scheduler or unsupported private executor/adapter. |
 | `501 pool_continuation_unsupported` | Send full history instead of server-side continuation handles. |

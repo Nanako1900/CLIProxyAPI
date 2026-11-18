@@ -177,6 +177,11 @@ func unwrapExecutionBoundaryError(err error) error {
 }
 
 func roundPickFailureError(lastErr, upstreamErr, errPick error) error {
+	// A plan change at admission is a skipped candidate, not an attempt. If
+	// the remaining eligible credentials are cooling down, report their 429.
+	if ae, ok := lastErr.(*Error); ok && ae.Code == ErrorCodePoolModelNotSupported && statusCodeFromError(errPick) == http.StatusTooManyRequests {
+		lastErr = errPick
+	}
 	preferred := preferredExecutionAttemptError(lastErr, upstreamErr)
 	if isSchedulerRejectError(errPick) {
 		return markRoundEndedBySchedulerReject(preferred)
@@ -1077,6 +1082,13 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 					warnLogUpstreamFailure(execCtx, entry, provider, upstreamModel, auth, durationExec, errExec)
 				}
 			}
+			if errors.Is(errExec, errClaudePlanChanged) {
+				delete(attempted, auth.ID)
+				if lastErr == nil {
+					lastErr = noClaudeFableAccount()
+				}
+				break
+			}
 			if errCancel := claudeOAuthRequestCancellation(execCtx, auth, errExec); errCancel != nil {
 				return cliproxyexecutor.Response{}, errCancel
 			}
@@ -1297,6 +1309,13 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 				} else {
 					warnLogUpstreamFailure(execCtx, entry, provider, upstreamModel, auth, durationExec, errExec)
 				}
+			}
+			if errors.Is(errExec, errClaudePlanChanged) {
+				delete(attempted, auth.ID)
+				if lastErr == nil {
+					lastErr = noClaudeFableAccount()
+				}
+				break
 			}
 			if errCancel := claudeOAuthRequestCancellation(execCtx, auth, errExec); errCancel != nil {
 				return cliproxyexecutor.Response{}, errCancel
@@ -1658,6 +1677,13 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 			pooled = false
 		}
 		streamResult, errStream := m.executeStreamWithModelPool(execCtx, executor, auth, provider, execReq, execOpts, routeModel, streamExecutionModel, models, pooled, aliasResult, routing, !homeMode || selection != nil, selection != nil)
+		if errors.Is(errStream, errClaudePlanChanged) {
+			delete(attempted, auth.ID)
+			if lastErr == nil {
+				lastErr = noClaudeFableAccount()
+			}
+			continue
+		}
 		if errStream != nil {
 			if hasUpstreamExecutionAttempt(errStream) {
 				upstreamErr = errStream
@@ -2450,7 +2476,7 @@ func safeErrorDiagnosticForLog(err error) string {
 }
 
 func warnLogUpstreamFailure(ctx context.Context, entry *log.Entry, provider, model string, auth *Auth, duration time.Duration, err error) {
-	if err == nil {
+	if err == nil || errors.Is(err, errClaudePlanChanged) {
 		return
 	}
 	if ctx != nil && errors.Is(ctx.Err(), context.Canceled) {
@@ -2753,11 +2779,17 @@ func (m *Manager) VerifyInference(ctx context.Context, id, model string) (*Auth,
 	regEpoch := auth.RegistrationEpoch
 
 	streamRes, errStream := m.streamInPool(execCtx, executor, auth, req, opts)
+	if errors.Is(errStream, errClaudePlanChanged) {
+		return auth, noClaudeFableAccount()
+	}
 	if errStream != nil {
 		rerr := resultErrorFromError(errStream)
 		if rerr != nil && rerr.HTTPStatus == http.StatusNotImplemented {
 			opts.Stream = false
 			resp, errExec := m.executeInPool(execCtx, executor, auth, req, opts)
+			if errors.Is(errExec, errClaudePlanChanged) {
+				return auth, noClaudeFableAccount()
+			}
 			rerrExec := resultErrorFromError(errExec)
 			if rerrExec != nil {
 				rerrExec.Message = sanitizeRenewalMessage(rerrExec.Message)

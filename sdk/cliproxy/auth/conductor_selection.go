@@ -1427,6 +1427,10 @@ func (m *Manager) pickViaPluginScheduler(ctx context.Context, scheduler PluginSc
 }
 
 func (m *Manager) authSupportsRouteModel(registryRef *registry.ModelRegistry, auth *Auth, routeModel string) bool {
+	return m.ClaudePlanAllowsModel(auth, routeModel) && m.authRegistersRouteModel(registryRef, auth, routeModel)
+}
+
+func (m *Manager) authRegistersRouteModel(registryRef *registry.ModelRegistry, auth *Auth, routeModel string) bool {
 	if registryRef == nil || auth == nil {
 		return true
 	}
@@ -2288,7 +2292,7 @@ func (m *Manager) routeAwareSelectionRequired(auth *Auth, routeModel string) boo
 	if auth == nil || strings.TrimSpace(routeModel) == "" {
 		return false
 	}
-	return !sameCanonicalModelKey(m.selectionModelForAuth(auth, routeModel), routeModel)
+	return !m.ClaudePlanAllowsModel(auth, routeModel) || !sameCanonicalModelKey(m.selectionModelForAuth(auth, routeModel), routeModel)
 }
 
 func requestAwareCredSelectionRequired(ctx context.Context, auth *Auth, clientHeaders ...http.Header) bool {
@@ -2349,6 +2353,7 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 	if hasAffinity && affinitySelector != nil {
 		_, weighted = affinitySelector.fallback.(*WeightedRoundRobinSelector)
 	}
+	var planExcluded planExcludedIDs
 	trackPinnedAccounting := pinnedAuthID != "" && weighted
 	var accountingCandidates, affinityCandidates []*Auth
 	if trackTransientAffinity {
@@ -2364,7 +2369,13 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 		if !eligibility.allows(candidate) {
 			continue
 		}
-		if modelKey != "" && !m.authSupportsRouteModel(registryRef, candidate, model) {
+		if modelKey != "" && !m.authRegistersRouteModel(registryRef, candidate, model) {
+			continue
+		}
+		if !m.ClaudePlanAllowsModel(candidate, model) {
+			if pinnedAuthID == "" || pinnedAuthID == candidate.ID {
+				planExcluded.add(candidate.ID)
+			}
 			continue
 		}
 		_, used := tried[candidate.ID]
@@ -2383,6 +2394,11 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 		}
 		candidates = append(candidates, candidate)
 	}
+	if len(candidates) == 0 && len(planExcluded) > 0 && len(tried) == 0 {
+		m.mu.RUnlock()
+		return nil, nil, noClaudeFableAccount()
+	}
+	ctx = planExcluded.withContext(ctx)
 	canInspectUnavailableAffinity := hasAffinity && affinitySelector != nil && affinitySelector.rebindOnNever && pluginScheduler == nil
 	if len(candidates) == 0 && !canInspectUnavailableAffinity {
 		m.mu.RUnlock()
@@ -2414,7 +2430,7 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 	transientAuthIDs := m.transientlyUnavailableSessionAffinityAuthIDs(ctx, selector, affinityCandidates, model, now, opts.Headers)
 	m.mu.RUnlock()
 
-	selected, handled, excluded, errPick := m.pickViaPluginScheduler(ctx, pluginScheduler, provider, []string{provider}, model, opts, tried, available)
+	selected, handled, excluded, errPick := m.pickViaPluginScheduler(ctx, pluginScheduler, provider, []string{provider}, model, opts, mergeTriedAuthIDs(tried, planExcluded), available)
 	effectiveTried := mergeTriedAuthIDs(tried, excluded)
 	if errPick != nil {
 		m.warnLogAuthUnavailable(ctx, []string{provider}, model, opts, effectiveTried, errPick)
@@ -2853,6 +2869,7 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 	if hasAffinity && affinitySelector != nil {
 		_, weighted = affinitySelector.fallback.(*WeightedRoundRobinSelector)
 	}
+	var planExcluded planExcludedIDs
 	trackPinnedAccounting := pinnedAuthID != "" && weighted
 	var accountingCandidates, affinityCandidates []*Auth
 	if trackTransientAffinity {
@@ -2878,7 +2895,13 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 		if _, ok := m.executorLocked(providerKey); !ok {
 			continue
 		}
-		if modelKey != "" && !m.authSupportsRouteModel(registryRef, candidate, model) {
+		if modelKey != "" && !m.authRegistersRouteModel(registryRef, candidate, model) {
+			continue
+		}
+		if !m.ClaudePlanAllowsModel(candidate, model) {
+			if pinnedAuthID == "" || pinnedAuthID == candidate.ID {
+				planExcluded.add(candidate.ID)
+			}
 			continue
 		}
 		_, used := tried[candidate.ID]
@@ -2897,6 +2920,11 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 		}
 		candidates = append(candidates, candidate)
 	}
+	if len(candidates) == 0 && len(planExcluded) > 0 && len(tried) == 0 {
+		m.mu.RUnlock()
+		return nil, nil, "", noClaudeFableAccount()
+	}
+	ctx = planExcluded.withContext(ctx)
 	canInspectUnavailableAffinity := hasAffinity && affinitySelector != nil && affinitySelector.rebindOnNever && pluginScheduler == nil
 	if len(candidates) == 0 && !canInspectUnavailableAffinity {
 		m.mu.RUnlock()
@@ -2928,7 +2956,7 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 	transientAuthIDs := m.transientlyUnavailableSessionAffinityAuthIDs(ctx, selector, affinityCandidates, model, now, opts.Headers)
 	m.mu.RUnlock()
 
-	selected, handled, excluded, errPick := m.pickViaPluginScheduler(ctx, pluginScheduler, "mixed", providers, model, opts, tried, available)
+	selected, handled, excluded, errPick := m.pickViaPluginScheduler(ctx, pluginScheduler, "mixed", providers, model, opts, mergeTriedAuthIDs(tried, planExcluded), available)
 	effectiveTried := mergeTriedAuthIDs(tried, excluded)
 	if errPick != nil {
 		m.warnLogAuthUnavailable(ctx, providers, model, opts, effectiveTried, errPick)

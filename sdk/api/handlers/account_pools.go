@@ -34,7 +34,7 @@ func (h *BaseAPIHandler) filterPoolModelsContext(ctx context.Context, models []m
 			continue
 		}
 		for _, model := range registry.GetGlobalRegistry().GetModelsForClient(a.ID) {
-			if model != nil {
+			if model != nil && h.AuthManager.ClaudePlanAllowsModel(a, model.ID) {
 				allowed[model.ID] = true
 			}
 		}
