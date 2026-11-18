@@ -8,10 +8,16 @@ proxy; in Docker, `127.0.0.1` refers to the container itself.
 
 The field is required for new built-in OAuth logins only. Empty values,
 HTTP proxies, direct mode, invalid ports, and URLs with paths or query parameters
-are rejected before starting a session. Validation checks the URL format; the
-actual connection happens when the provider flow makes an outbound request.
+are rejected before starting a session. Validating the URL format alone does not test connectivity.
 The panel sends the address in a POST body, masks it in the input, and does not
 save it in browser storage. Starting another account returns to an empty field.
+
+To verify the route before login, select **Check exit IP**. CPA contacts
+`https://api64.ipify.org` through the entered SOCKS proxy and displays the IPv4
+or IPv6 address observed by the service. Editing the field clears the result.
+A failed check never falls back to a direct or global route. The check is optional:
+it neither starts a session nor saves the proxy. The result is a snapshot of
+CPA’s exit IP, not the browser’s IP or a guarantee for a rotating proxy.
 
 Third-party plugins such as Kiro can start login or import credentials without
 `proxy_url`, including through their own plugin pages. The common OAuth dialog

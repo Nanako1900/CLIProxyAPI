@@ -136,7 +136,7 @@ func TestStartOAuthV8RequiresSOCKSBeforeProviderInitialization(t *testing.T) {
 		}
 	}
 	for _, value := range []string{"socks5://localhost:1080", "socks5h://user:pass@[::1]:1080"} {
-		if errValidate := validateNewOAuthSOCKSProxy(value); errValidate != nil {
+		if _, errValidate := parseNewOAuthSOCKSProxy(value); errValidate != nil {
 			t.Fatalf("valid SOCKS proxy rejected: %v", errValidate)
 		}
 	}

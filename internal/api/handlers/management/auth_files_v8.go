@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,16 +128,16 @@ func builtinOAuthRequiresSOCKS(provider string) bool {
 
 // New built-in accounts must choose their SOCKS route before OAuth work starts.
 // Existing credentials retain their saved route when they are reauthenticated.
-func validateNewOAuthSOCKSProxy(raw string) error {
+func parseNewOAuthSOCKSProxy(raw string) (*url.URL, error) {
 	proxyURL, errValidate := validateOAuthSessionProxyURL(raw)
 	if errValidate != nil || proxyURL == "" {
-		return fmt.Errorf("proxy_url is required: use socks5:// or socks5h://host:port")
+		return nil, fmt.Errorf("proxy_url is required: use socks5:// or socks5h://host:port")
 	}
 	setting, errParse := proxyutil.Parse(proxyURL)
 	if errParse != nil || setting.URL == nil || (setting.URL.Scheme != "socks5" && setting.URL.Scheme != "socks5h") {
-		return fmt.Errorf("proxy_url must use socks5:// or socks5h://host:port")
+		return nil, fmt.Errorf("proxy_url must use socks5:// or socks5h://host:port")
 	}
-	return nil
+	return setting.URL, nil
 }
 
 func oauthAccountProxyURL(auth *coreauth.Auth) string {
@@ -449,7 +450,7 @@ func (h *Handler) StartOAuthV8(c *gin.Context) {
 			VerifyModel:      verifyModel,
 		})
 	} else if builtinOAuthRequiresSOCKS(provider) {
-		if errProxy := validateNewOAuthSOCKSProxy(oauthSessionProxyURLFromContext(c)); errProxy != nil {
+		if _, errProxy := parseNewOAuthSOCKSProxy(oauthSessionProxyURLFromContext(c)); errProxy != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": errProxy.Error()})
 			return
 		}
