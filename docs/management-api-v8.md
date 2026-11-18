@@ -212,6 +212,7 @@ retain the corresponding business operation's fields.
 | `/credentials/verify` | POST | Run an operator-triggered, account-pinned inference verification using an isolated session and minimal 1-token prompt. |
 | `/oauth/import?provider=vertex` | POST | Import a Vertex service account using a multipart `file` upload. |
 | `/oauth/auth-url` | POST; GET for plugins or targeted recovery | Start built-in or plugin OAuth with a required account SOCKS proxy for new built-in sessions; supports `name`/`auth_index` recovery and optional `verify`. |
+| `/oauth/proxy-ip` | POST | Check the SOCKS `proxy_url` supplied in the JSON body without starting login. Returns `{"ip":"…"}` on success, `400` for invalid input or `502` if the exit IP cannot be verified. |
 | `/oauth/siwc/bind` | POST | Start SIWC binding to an existing file-backed Codex OAuth credential. |
 | `/oauth/siwc/status` | GET | Read local SIWC credential status (`off`, `valid`, or `invalid`). |
 | `/oauth/status?state=<state>` | GET | Get login status. |

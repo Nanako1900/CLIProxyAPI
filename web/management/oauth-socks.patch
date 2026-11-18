@@ -5,15 +5,20 @@ diff --git a/src/services/api/oauth.ts b/src/services/api/oauth.ts
   */
 
  import { apiClient } from './client';
-+import { validateOAuthLoginProxy } from '@/features/oauth/socksProxy';
++import { validateOAuthLoginProxy, validateOAuthSocksProxy } from '@/features/oauth/socksProxy';
  import {
    isManagementOAuthProviderKey,
    normalizeManagementOAuthProviderKey,
-@@ -50,16 +51,20 @@
+@@ -50,16 +51,25 @@
    startSiwcBind: (name: string, signal?: AbortSignal) =>
      apiClient.post<SiwcBindResponse>('/oauth/siwc/bind', { name }, signal ? { signal } : undefined),
 
 -  startAuth: (provider: string, signal?: AbortSignal) => {
++  checkProxyIP: (proxyUrl: string, signal: AbortSignal) => {
++    if (validateOAuthSocksProxy(proxyUrl)) throw new Error('A valid SOCKS proxy is required');
++    return apiClient.post<{ ip: string }>('/oauth/proxy-ip', { proxy_url: proxyUrl.trim() }, { signal });
++  },
++
 +  startAuth: (provider: string, proxyUrl = '', signal?: AbortSignal) => {
 +    if (validateOAuthLoginProxy(provider, proxyUrl))
 +      throw new Error('A valid SOCKS proxy is required');
@@ -369,7 +374,7 @@ diff --git a/src/features/oauth/components/OAuthFlowDialog.tsx b/src/features/oa
 diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
 --- a/src/i18n/locales/en.json
 +++ b/src/i18n/locales/en.json
-@@ -820,6 +820,15 @@
+@@ -820,6 +820,19 @@
      "upgrade_required_desc": "The current server does not support the OAuth model aliases API. Please upgrade to the latest CLI Proxy API (CPA) version."
    },
    "auth_login": {
@@ -379,6 +384,10 @@ diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
 +    "socks_hint": "Paste a socks5:// or socks5h:// address with a port. CPA uses it for OAuth and saves it with the account. Your browser must be configured separately to use the same exit IP.",
 +    "socks_required": "Paste a SOCKS proxy before starting login.",
 +    "socks_invalid": "Use socks5:// or socks5h://host:port (1–65535), optionally with username and password. Do not include a path, query, or fragment.",
++    "socks_ip_check": "Check exit IP",
++    "socks_ip_checking": "Checking exit IP…",
++    "socks_ip_result": "CPA proxy exit IP (not your browser): {{ip}}",
++    "socks_ip_failed": "Could not verify the exit IP. Check the SOCKS address, port and credentials, or retry later.",
 +    "socks_start": "Create login with SOCKS",
 +    "socks_session_hint": "This login uses the SOCKS proxy you supplied. Open the authorization page in a browser using the same exit IP; this page cannot change browser proxy settings.",
 +    "socks_saved_hint": "The SOCKS proxy has been saved with this account.",
@@ -388,7 +397,7 @@ diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
 diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
 --- a/src/i18n/locales/zh-CN.json
 +++ b/src/i18n/locales/zh-CN.json
-@@ -818,6 +818,15 @@
+@@ -818,6 +818,19 @@
      "upgrade_required_desc": "当前服务器版本不支持 OAuth 模型别名功能，请升级到最新版本的 CPA（CLI Proxy API）后重试。"
    },
    "auth_login": {
@@ -398,6 +407,10 @@ diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
 +    "socks_hint": "粘贴带端口的 socks5:// 或 socks5h:// 地址。CPA 将用它完成 OAuth，并自动保存到账号。登录用的浏览器需要单独配置为同一出口 IP。",
 +    "socks_required": "请先粘贴 SOCKS 代理，再开始登录。",
 +    "socks_invalid": "请输入 socks5:// 或 socks5h://主机:端口（1–65535），可包含用户名和密码；不要附加路径、查询参数或片段。",
++    "socks_ip_check": "检测出口 IP",
++    "socks_ip_checking": "正在检测出口 IP…",
++    "socks_ip_result": "CPA 通过此代理的出口 IP（不是浏览器 IP）：{{ip}}",
++    "socks_ip_failed": "未能确认出口 IP。请检查 SOCKS 地址、端口和账号密码，或稍后重试。",
 +    "socks_start": "使用 SOCKS 创建登录",
 +    "socks_session_hint": "本次登录已绑定所填 SOCKS。请在使用同一出口 IP 的浏览器中打开授权页；此页面无法修改浏览器代理。",
 +    "socks_saved_hint": "SOCKS 代理已随凭据自动保存到此账号。",
@@ -407,7 +420,7 @@ diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
 diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
 --- a/src/i18n/locales/zh-TW.json
 +++ b/src/i18n/locales/zh-TW.json
-@@ -818,6 +818,15 @@
+@@ -818,6 +818,19 @@
      "upgrade_required_desc": "目前伺服器版本不支援 OAuth 模型別名功能，請升級到最新版本的 CPA（CLI Proxy API）後重試。"
    },
    "auth_login": {
@@ -417,6 +430,10 @@ diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
 +    "socks_hint": "貼上含連接埠的 socks5:// 或 socks5h:// 位址。CPA 會用它完成 OAuth，並自動儲存至帳號。登入用的瀏覽器需另外設定為相同出口 IP。",
 +    "socks_required": "請先貼上 SOCKS 代理，再開始登入。",
 +    "socks_invalid": "請輸入 socks5:// 或 socks5h://主機:連接埠（1–65535），可包含使用者名稱與密碼；不要附加路徑、查詢參數或片段。",
++    "socks_ip_check": "檢測出口 IP",
++    "socks_ip_checking": "正在檢測出口 IP…",
++    "socks_ip_result": "CPA 透過此代理的出口 IP（不是瀏覽器 IP）：{{ip}}",
++    "socks_ip_failed": "無法確認出口 IP。請檢查 SOCKS 位址、連接埠及帳號密碼，或稍後重試。",
 +    "socks_start": "使用 SOCKS 建立登入",
 +    "socks_session_hint": "本次登入已綁定填入的 SOCKS。請在使用相同出口 IP 的瀏覽器開啟授權頁；此頁面無法修改瀏覽器代理。",
 +    "socks_saved_hint": "SOCKS 代理已隨憑證自動儲存至此帳號。",
@@ -426,7 +443,7 @@ diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
 diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
 --- a/src/i18n/locales/ru.json
 +++ b/src/i18n/locales/ru.json
-@@ -823,6 +823,15 @@
+@@ -823,6 +823,19 @@
      "upgrade_required_desc": "Текущая версия сервера не поддерживает API псевдонимов моделей OAuth. Обновите CLI Proxy API (CPA) до последней версии."
    },
    "auth_login": {
@@ -436,6 +453,10 @@ diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
 +    "socks_hint": "Вставьте адрес socks5:// или socks5h:// с портом. CPA использует его для OAuth и сохранит в аккаунте. Настройте браузер отдельно для того же внешнего IP.",
 +    "socks_required": "Перед входом укажите SOCKS-прокси.",
 +    "socks_invalid": "Укажите socks5:// или socks5h://хост:порт (1–65535), при необходимости с логином и паролем. Путь, параметры и фрагмент не допускаются.",
++    "socks_ip_check": "Проверить исходящий IP",
++    "socks_ip_checking": "Проверка исходящего IP…",
++    "socks_ip_result": "Исходящий IP прокси CPA (не браузера): {{ip}}",
++    "socks_ip_failed": "Не удалось проверить исходящий IP. Проверьте адрес, порт и учётные данные SOCKS или повторите попытку позже.",
 +    "socks_start": "Начать вход через SOCKS",
 +    "socks_session_hint": "Для этого входа используется указанный SOCKS-прокси. Откройте страницу авторизации в браузере с тем же внешним IP; эта страница не меняет настройки прокси браузера.",
 +    "socks_saved_hint": "SOCKS-прокси сохранён в этом аккаунте.",
@@ -445,7 +466,7 @@ diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
 diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
 --- a/src/i18n/locales/vi.json
 +++ b/src/i18n/locales/vi.json
-@@ -776,6 +776,15 @@
+@@ -776,6 +776,19 @@
      "remove_mapping": "Xóa ánh xạ bí danh {{number}}"
    },
    "auth_login": {
@@ -455,6 +476,10 @@ diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
 +    "socks_hint": "Dán địa chỉ socks5:// hoặc socks5h:// kèm cổng. CPA dùng proxy cho OAuth và lưu vào tài khoản. Cần cấu hình riêng trình duyệt để dùng cùng IP đầu ra.",
 +    "socks_required": "Dán proxy SOCKS trước khi đăng nhập.",
 +    "socks_invalid": "Dùng socks5:// hoặc socks5h://máy-chủ:cổng (1–65535), có thể kèm tên người dùng và mật khẩu. Không thêm đường dẫn, tham số truy vấn hoặc đoạn định danh.",
++    "socks_ip_check": "Kiểm tra IP đầu ra",
++    "socks_ip_checking": "Đang kiểm tra IP đầu ra…",
++    "socks_ip_result": "IP đầu ra của CPA qua proxy (không phải IP trình duyệt): {{ip}}",
++    "socks_ip_failed": "Không thể xác minh IP đầu ra. Hãy kiểm tra địa chỉ, cổng và thông tin đăng nhập SOCKS hoặc thử lại sau.",
 +    "socks_start": "Tạo đăng nhập qua SOCKS",
 +    "socks_session_hint": "Lần đăng nhập này dùng proxy SOCKS đã nhập. Mở trang xác thực trong trình duyệt có cùng IP đầu ra; trang này không thể thay đổi proxy của trình duyệt.",
 +    "socks_saved_hint": "Proxy SOCKS đã được lưu vào tài khoản này.",
@@ -464,7 +489,7 @@ diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
 diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
 --- a/src/i18n/locales/ko.json
 +++ b/src/i18n/locales/ko.json
-@@ -820,6 +820,15 @@
+@@ -820,6 +820,19 @@
      "upgrade_required_desc": "현재 서버는 OAuth 모델 별칭 API를 지원하지 않습니다. 최신 버전의 CLI Proxy API(CPA)로 업그레이드하세요."
    },
    "auth_login": {
@@ -474,6 +499,10 @@ diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
 +    "socks_hint": "포트가 포함된 socks5:// 또는 socks5h:// 주소를 붙여 넣으세요. CPA는 OAuth에 사용하고 계정에 저장합니다. 브라우저도 같은 외부 IP를 사용하도록 별도로 설정해야 합니다.",
 +    "socks_required": "로그인 전에 SOCKS 프록시를 입력하세요.",
 +    "socks_invalid": "socks5:// 또는 socks5h://호스트:포트 (1–65535)를 입력하세요. 사용자 이름과 비밀번호는 선택 사항이며 경로, 쿼리, 프래그먼트는 허용되지 않습니다.",
++    "socks_ip_check": "출구 IP 확인",
++    "socks_ip_checking": "출구 IP 확인 중…",
++    "socks_ip_result": "CPA 프록시 출구 IP(브라우저 IP 아님): {{ip}}",
++    "socks_ip_failed": "출구 IP를 확인할 수 없습니다. SOCKS 주소, 포트 및 인증 정보를 확인하거나 나중에 다시 시도하세요.",
 +    "socks_start": "SOCKS로 로그인 시작",
 +    "socks_session_hint": "이 로그인은 입력한 SOCKS 프록시를 사용합니다. 같은 외부 IP를 사용하는 브라우저에서 인증 페이지를 여세요. 이 페이지는 브라우저의 프록시 설정을 변경할 수 없습니다.",
 +    "socks_saved_hint": "SOCKS 프록시가 이 계정에 저장되었습니다.",
@@ -483,7 +512,7 @@ diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
 diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
 --- a/src/i18n/locales/tr.json
 +++ b/src/i18n/locales/tr.json
-@@ -820,6 +820,15 @@
+@@ -820,6 +820,19 @@
      "upgrade_required_desc": "Geçerli Sunucu OAuth Model Takma Adları API Değerini Desteklemiyor. En Son CLIProxyAPI (CPA) Sürümüne Yükselt."
    },
    "auth_login": {
@@ -493,6 +522,10 @@ diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
 +    "socks_hint": "Port içeren bir socks5:// veya socks5h:// adresi yapıştırın. CPA bunu OAuth için kullanır ve hesaba kaydeder. Tarayıcıyı aynı çıkış IP adresini kullanacak şekilde ayrıca yapılandırın.",
 +    "socks_required": "Oturum açmadan önce bir SOCKS vekil sunucusu girin.",
 +    "socks_invalid": "socks5:// veya socks5h://sunucu:port (1–65535) kullanın. Kullanıcı adı ve parola isteğe bağlıdır; yol, sorgu veya parça eklemeyin.",
++    "socks_ip_check": "Çıkış IP adresini kontrol et",
++    "socks_ip_checking": "Çıkış IP adresi kontrol ediliyor…",
++    "socks_ip_result": "CPA vekil sunucusunun çıkış IP adresi (tarayıcının değil): {{ip}}",
++    "socks_ip_failed": "Çıkış IP adresi doğrulanamadı. SOCKS adresini, bağlantı noktasını ve kimlik bilgilerini kontrol edin veya daha sonra tekrar deneyin.",
 +    "socks_start": "SOCKS ile oturum açmayı başlat",
 +    "socks_session_hint": "Bu oturum açma işlemi girdiğiniz SOCKS vekil sunucusunu kullanır. Yetkilendirme sayfasını aynı çıkış IP adresine sahip bir tarayıcıda açın; bu sayfa tarayıcının vekil sunucu ayarlarını değiştiremez.",
 +    "socks_saved_hint": "SOCKS vekil sunucusu bu hesaba kaydedildi.",

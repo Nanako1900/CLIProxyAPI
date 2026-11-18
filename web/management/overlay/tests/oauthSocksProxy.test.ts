@@ -77,6 +77,7 @@ describe('OAuth account proxy policy', () => {
       ]) {
         expect(validateOAuthSocksProxy(value)).toBeTruthy();
         expect(() => oauthApi.startAuth('codex', value)).toThrow();
+        expect(() => oauthApi.checkProxyIP(value, new AbortController().signal)).toThrow();
       }
       expect(post).not.toHaveBeenCalled();
     } finally {
@@ -131,6 +132,20 @@ describe('OAuth account proxy policy', () => {
     }
   });
 
+  test('checks only the entered route without starting an OAuth session', async () => {
+    const ip = '2001:db8::12';
+    const post = spyOn(apiClient, 'post').mockResolvedValue({ ip });
+    const signal = new AbortController().signal;
+    const proxy = 'socks5h://user:fixture-password@proxy.example.test:1080';
+    try {
+      expect(await oauthApi.checkProxyIP(` ${proxy} `, signal)).toEqual({ ip });
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(post).toHaveBeenCalledWith('/oauth/proxy-ip', { proxy_url: proxy }, { signal });
+    } finally {
+      post.mockRestore();
+    }
+  });
+
   test('sends the account proxy only in the POST body for every OAuth provider', async () => {
     const post = spyOn(apiClient, 'post').mockResolvedValue({
       url: 'https://example.test',
@@ -164,6 +179,18 @@ describe('OAuth account proxy policy', () => {
     } finally {
       post.mockRestore();
       get.mockRestore();
+    }
+  });
+
+  test('enables the separate exit IP check only for a valid SOCKS address', async () => {
+    const i18n = createInstance();
+    await i18n.init({ lng: 'en', resources: { en: { translation: en } } });
+    for (const proxyUrl of ['', 'socks5://host', 'socks5h://host:1080']) {
+      const markup = renderDialog(i18n, 'codex', { proxyUrl });
+      const check = markup.match(/(<button\b[^>]*>)<span>Check exit IP<\/span>/);
+      expect(check).not.toBeNull();
+      expect(check![1]).toContain('type="button"');
+      expect(check![1].includes('disabled')).toBe(Boolean(validateOAuthSocksProxy(proxyUrl)));
     }
   });
 
