@@ -154,6 +154,9 @@ type Config struct {
 	// Devin configures provider-wide Devin request behavior.
 	Devin DevinConfig `yaml:"devin" json:"devin"`
 
+	// GeminiHeaderDefaults configures request headers shared by native Gemini channels.
+	GeminiHeaderDefaults GeminiHeaderDefaults `yaml:"gemini-header-defaults" json:"gemini-header-defaults"`
+
 	// GeminiKey defines Gemini API key configurations with optional routing overrides.
 	GeminiKey []GeminiKey `yaml:"gemini-api-key" json:"gemini-api-key"`
 

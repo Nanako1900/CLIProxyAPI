@@ -19,6 +19,7 @@ const clientUserAgentRefreshInterval = 3 * time.Hour
 type clientUserAgentSettings struct {
 	Codex    bool
 	Claude   bool
+	Gemini   bool
 	ProxyURL string
 }
 
@@ -29,6 +30,7 @@ func userAgentSettings(cfg *config.Config) clientUserAgentSettings {
 	}
 	settings.ProxyURL = cfg.ProxyURL
 	settings.Codex = strings.EqualFold(strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent), "auto")
+	settings.Gemini = strings.EqualFold(strings.TrimSpace(cfg.GeminiHeaderDefaults.UserAgent), "auto")
 	settings.Claude = strings.EqualFold(strings.TrimSpace(cfg.ClaudeHeaderDefaults.UserAgent), "auto")
 	hasAutoHeader := func(headers map[string]string) bool {
 		for name, value := range headers {
@@ -44,7 +46,33 @@ func userAgentSettings(cfg *config.Config) clientUserAgentSettings {
 	for _, key := range cfg.ClaudeKey {
 		settings.Claude = settings.Claude || hasAutoHeader(key.Headers)
 	}
+	for _, key := range cfg.GeminiKey {
+		settings.Gemini = settings.Gemini || hasAutoHeader(key.Headers)
+	}
+	for _, key := range cfg.InteractionsKey {
+		settings.Gemini = settings.Gemini || hasAutoHeader(key.Headers)
+	}
+	for _, key := range cfg.VertexCompatAPIKey {
+		settings.Gemini = settings.Gemini || (hasAutoHeader(key.Headers) && vertexKeyCanUseGeminiUserAgent(key))
+	}
 	return settings
+}
+
+func vertexKeyCanUseGeminiUserAgent(key config.VertexCompatKey) bool {
+	// An empty list uses the mutable Vertex model catalog.
+	if len(key.Models) == 0 || (key.Interactions != nil && *key.Interactions) {
+		return true
+	}
+	for _, model := range key.Models {
+		setting := model.OpenAPI
+		if setting == nil {
+			setting = key.OpenAPI
+		}
+		if vertexRequiresNativeModel(model.Name) || !vertexDefaultOpenAPIRoute(model.Name, setting) {
+			return true
+		}
+	}
+	return false
 }
 
 // RunClientUserAgentUpdater follows opt-in auto settings for one service lifetime.
@@ -79,7 +107,7 @@ func runClientUserAgentUpdater(ctx context.Context, getConfig func() *config.Con
 		}
 		completed = nil
 		previous = settings
-		if !settings.Codex && !settings.Claude {
+		if !settings.Codex && !settings.Claude && !settings.Gemini {
 			return
 		}
 		lookupCtx, cancelLookup := context.WithCancel(ctx)
@@ -110,7 +138,7 @@ func runClientUserAgentUpdater(ctx context.Context, getConfig func() *config.Con
 
 func refreshClientUserAgents(ctx context.Context, settings clientUserAgentSettings, client *http.Client, cache *clientVersionCache) {
 	var pending sync.WaitGroup
-	for provider, enabled := range map[string]bool{"codex": settings.Codex, "claude": settings.Claude} {
+	for provider, enabled := range map[string]bool{"codex": settings.Codex, "claude": settings.Claude, "gemini": settings.Gemini} {
 		if !enabled {
 			continue
 		}
@@ -139,11 +167,11 @@ func refreshClientUserAgents(ctx context.Context, settings clientUserAgentSettin
 }
 
 func fetchClientUserAgentVersion(ctx context.Context, client *http.Client, provider string) (string, error) {
-	packageName := "@openai/codex"
-	if provider == "claude" {
-		packageName = "@anthropic-ai/claude-code"
+	registryURL := clientUserAgentRegistryURL(provider)
+	if registryURL == "" {
+		return "", fmt.Errorf("unknown client version provider %q", provider)
 	}
-	req, errRequest := http.NewRequestWithContext(ctx, http.MethodGet, "https://registry.npmjs.org/"+packageName+"/latest", nil)
+	req, errRequest := http.NewRequestWithContext(ctx, http.MethodGet, registryURL, nil)
 	if errRequest != nil {
 		return "", errRequest
 	}
@@ -175,4 +203,16 @@ func fetchClientUserAgentVersion(ctx context.Context, client *http.Client, provi
 		return "", fmt.Errorf("official registry did not return a stable client version")
 	}
 	return version, nil
+}
+
+func clientUserAgentRegistryURL(provider string) string {
+	switch provider {
+	case "codex":
+		return "https://registry.npmjs.org/@openai/codex/latest"
+	case "claude":
+		return "https://registry.npmjs.org/@anthropic-ai/claude-code/latest"
+	case "gemini":
+		return "https://registry.npmjs.org/@google/gemini-cli/latest"
+	}
+	return ""
 }

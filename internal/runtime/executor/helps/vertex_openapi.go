@@ -111,8 +111,7 @@ func ShouldExecuteVertexOpenAPI(auth *cliproxyauth.Auth, model string) bool {
 // endpoint selection in that order, preserving alias-specific overrides.
 func ShouldExecuteVertexOpenAPIForRequest(cfg *config.Config, auth *cliproxyauth.Auth, model string, opts cliproxyexecutor.Options) bool {
 	model = strings.TrimSpace(model)
-	baseModel := strings.TrimSpace(thinking.ParseSuffix(model).ModelName)
-	if strings.Contains(strings.ToLower(baseModel), "imagen") {
+	if vertexRequiresNativeModel(model) {
 		return false
 	}
 	requestedModel := PayloadRequestedModel(opts, "")
@@ -166,8 +165,20 @@ func ShouldExecuteVertexOpenAPIForRequest(cfg *config.Config, auth *cliproxyauth
 	if setting, hasExplicit := vertexOpenAPIExplicitSetting(auth); hasExplicit {
 		return setting
 	}
-	if entry != nil && entry.OpenAPI != nil {
-		return *entry.OpenAPI
+	var defaultRoute *bool
+	if entry != nil {
+		defaultRoute = entry.OpenAPI
+	}
+	return vertexDefaultOpenAPIRoute(model, defaultRoute)
+}
+
+func vertexRequiresNativeModel(model string) bool {
+	return strings.Contains(strings.ToLower(thinking.ParseSuffix(model).ModelName), "imagen")
+}
+
+func vertexDefaultOpenAPIRoute(model string, setting *bool) bool {
+	if setting != nil {
+		return *setting
 	}
 	return IsVertexOpenAPIModel(model)
 }

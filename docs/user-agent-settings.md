@@ -1,12 +1,12 @@
-# Codex and Claude Code User-Agent settings
+# Claude Code, Codex and Gemini User-Agent settings
 
-Open **UA control panel** in the management sidebar (`#/user-agents`). Claude Code
-and Codex have separate views for configuration, runtime defaults, client samples
+Open **UA control panel** in the management sidebar (`#/user-agents`). Claude Code,
+Codex and Gemini each have a view for configuration, runtime defaults, client samples
 and identity rules. **Configuration → Advanced → Default headers** now links to
-this dedicated panel. The Docker image bundles it; no plugin installation is
-required. Save the configuration to apply changes to subsequent
-upstream requests without restarting CPA. Existing WebSocket connections retain
-their handshake until reconnected.
+this dedicated panel. The Docker image includes it. After you save, CPA reloads
+the configuration in the background. New requests use the updated settings once
+that reload completes. Existing WebSocket connections retain their handshake
+until reconnected.
 
 | Value | Behavior |
 | --- | --- |
@@ -16,7 +16,7 @@ their handshake until reconnected.
 
 ## Pick an identity from your clients
 
-1. Connect Claude Code or Codex to CPA and send a request using a valid CPA access
+1. Connect Claude Code, Codex or Gemini CLI to CPA and send a request using a valid CPA access
    key. Open **UA control panel** and refresh the
    corresponding **client UA list**. Collection starts after this version is
    deployed; historical logs are not imported.
@@ -26,7 +26,7 @@ their handshake until reconnected.
    copied. **Use this UA** fills only the UA field.
    **Use UA and captured fields** also fills the supported fields in that sample.
    Missing fields, timezone, and device stabilization settings stay unchanged.
-3. Use **Review and save → Save changes** to review old and new values for both
+3. Use **Review and save → Save changes** to review old and new values for the edited
    providers. Only edited fields are patched, with an ETag guard against concurrent
    configuration changes. A rejected save keeps the draft. Collection,
    importing, and selecting a sample never automatically change active settings.
@@ -49,11 +49,12 @@ X-Stainless-Timeout: 600
 This is an illustrative sample, not a certified version bundle. Use the exact
 values from your own client. For Codex, `User-Agent` and optional
 `X-Codex-Beta-Features` are supported. For Claude, the six headers shown above are
-supported. The list recognizes versioned `claude-cli`, `codex-tui`, `codex_cli_rs`,
+supported. A Gemini CLI sample stores its `User-Agent` only.
+The list recognizes versioned `GeminiCLI`, `claude-cli`, `codex-tui`, `codex_cli_rs`,
 `codex_exec`, `codex_vscode`, `codex`, and `Codex Desktop` identities. Headers are
 client-declared and can be spoofed; CPA does not certify the installed software.
 
-Authenticated incoming requests under `/v1` and `/backend-api/codex` are observed
+Authenticated incoming requests under `/v1`, `/v1beta` and `/backend-api/codex` are observed
 before executor header normalization, including response WebSocket handshakes.
 The UA catalog never stores credentials, cookies, IPs, or request bodies. It
 deduplicates identical supported header groups and keeps the latest 100 samples
@@ -108,14 +109,38 @@ billing version. OAuth login/refresh uses a separate control-plane identity.
 | --- | --- |
 | `oauth.providers.codex.header-defaults.user-agent` | Codex OAuth/file-backed credentials, including HTTP, streaming, compact, image, and WebSocket requests. |
 | `upstream.claude.header-defaults.user-agent` | Claude OAuth and API-key credentials, including streaming and upstream token counting. |
+| `upstream.gemini.header-defaults.user-agent` | Native Gemini, Interactions, native Vertex and Gemini CLI OAuth inference, including streaming and upstream token counting. |
 | `api-keys.codex[].headers.User-Agent` or a key's `headers.User-Agent` | That Codex API-key group or credential. The OAuth default does not apply here. |
 | `api-keys.claude[].headers.User-Agent` or a key's `headers.User-Agent` | That Claude API-key group or credential, overriding the shared default. |
+| `headers.User-Agent` on a Gemini, Interactions or Vertex API-key group or key, or a Gemini CLI credential | That credential's UA on the Gemini inference routes above. |
 
 Existing credential-file `header:User-Agent` attributes are also respected.
 Provider defaults and configured API-key headers accept `auto`; automatic lookups
 are enabled by those configuration fields, not by credential-file attributes alone.
 
-Example v8 configuration:
+### Gemini modes
+
+**Default** leaves native Gemini, Interactions and Vertex requests to Go's HTTP
+transport. It sends `Go-http-client/1.1` over HTTP/1.1 and `Go-http-client/2.0`
+over HTTP/2. The optional Gemini CLI OAuth plugin supplies its own default.
+Vertex OpenAI compatibility, AI Studio WebSocket relay and Antigravity use their
+respective channel identities.
+
+**Fixed** sends the configured UA on each covered request. **Auto** builds
+`GeminiCLI/<version>/<model> (<os>; <arch>; terminal)`. The model is the upstream
+model for that request, or `unknown` when unavailable. For a raw SDK Interactions
+request, CPA can read the model from the first 64 KiB of a replayable body.
+The OS and architecture come from the running proxy, so a Linux amd64 container
+reports `linux; x64`. The initial version is `0.34.0` until a newer stable release
+is cached.
+The setting controls the `User-Agent` header. The channel supplies any separate
+`X-Goog-Api-Client` header.
+
+Use a single spelling of `User-Agent` per credential. Gemini API-key configuration
+rejects conflicting values under different spellings. For existing credential
+files, the canonical `User-Agent` spelling takes priority.
+
+### Example v8 configuration
 
 ```yaml
 config-version: 8
@@ -128,6 +153,9 @@ upstream:
   claude:
     header-defaults:
       user-agent: auto
+  gemini:
+    header-defaults:
+      user-agent: auto
 ```
 
 Merge these fields into the existing configuration rather than replacing the
@@ -136,8 +164,8 @@ supports the same fields.
 
 ## Automatic updates
 
-Auto mode queries `https://registry.npmjs.org/@openai/codex/latest` and/or
-`https://registry.npmjs.org/@anthropic-ai/claude-code/latest` for enabled providers.
+For each provider in auto mode, CPA queries the npm `latest` endpoint for
+`@openai/codex`, `@anthropic-ai/claude-code` or `@google/gemini-cli`.
 Lookups happen on startup, when relevant auto/proxy settings change, and every
 three hours. Unrelated settings saves do not cause another lookup. The configured
 global proxy is used; provider credentials, cookies, and inference payloads are
@@ -184,7 +212,7 @@ The source build directory must be empty. See
 For the `Nanako1900/CLIProxyAPI` deployment, the PR targets `coolify`. Merging into
 the branch watched by Coolify triggers deployment when its automatic deployment
 is enabled; creating the PR alone does not prove a production deployment occurred.
-After deployment, enter `auto` or a full UA in the two fields and save. Codex
+After deployment, open the provider's tab, enter `auto` or a full UA, and save. Codex
 API-key groups use their own custom `User-Agent` header as described above.
 
 To stop tracking releases, replace `auto` with a fixed UA or clear it and save.

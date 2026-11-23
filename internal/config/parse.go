@@ -115,6 +115,7 @@ func ParseConfigBytes(data []byte) (*Config, error) {
 	}
 
 	// Apply the same sanitization pipeline.
+	cfg.GeminiHeaderDefaults.UserAgent = strings.TrimSpace(cfg.GeminiHeaderDefaults.UserAgent)
 	cfg.SanitizeGeminiKeys()
 	cfg.SanitizeInteractionsKeys()
 	cfg.SanitizeVertexCompatKeys()

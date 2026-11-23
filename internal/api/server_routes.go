@@ -1615,7 +1615,7 @@ func (s *Server) setupInferenceRoutes(root gin.IRouter) {
 
 	// Gemini compatible API routes
 	v1beta := root.Group("/v1beta")
-	v1beta.Use(AuthMiddleware(s.accessManager))
+	v1beta.Use(AuthMiddleware(s.accessManager), s.captureClientUserAgent)
 	{
 		v1beta.GET("/models", s.geminiModelsHandler(geminiHandlers))
 		v1beta.POST("/interactions", geminiHandlers.Interactions)

@@ -32,6 +32,7 @@ const config = {
         'native-entrypoints': ['custom'],
       },
     },
+    gemini: { 'header-defaults': { 'user-agent': 'Gemini CLI example', 'future-field': 'keep' } },
   },
   oauth: { providers: { codex: { 'header-defaults': { 'user-agent': 'codex_cli_rs/1.2.3' } } } },
   'api-keys': {
@@ -53,19 +54,39 @@ test('draft contains only identity settings and patches only edited v8 leaves', 
   after.claude.userAgent = '';
   after.claude.betaAppend = ' first, second\nfirst \n';
   after.codex.betaFeatures = 'enabled';
+  expect(before.gemini.userAgent).toBe('Gemini CLI example');
+  after.gemini.userAgent = 'auto';
   expect(userAgentConfigPatch(before, after)).toEqual({
     upstream: {
       claude: {
         'header-defaults': { 'user-agent': '', 'anthropic-beta-append': ['first', 'second'] },
       },
+      gemini: { 'header-defaults': { 'user-agent': 'auto' } },
     },
     oauth: { providers: { codex: { 'header-defaults': { 'beta-features': 'enabled' } } } },
   });
-  expect(userAgentChanges(before, after)).toHaveLength(3);
+  expect(userAgentChanges(before, after)).toHaveLength(4);
   expect(userAgentConfigPatch(before, before)).toEqual({});
   expect(config.upstream.claude['header-defaults']['future-field']).toBe('keep');
   expect(config.upstream.claude['header-defaults']['user-agent']).toBe('auto');
   expect(identityList(' first, second\nfirst ')).toEqual(['first', 'second']);
+});
+
+test('Gemini can set a fixed identity and clear it without patching other fields', () => {
+  const before = readUserAgentDraft({});
+  expect(before.gemini.userAgent).toBe('');
+  const fixed = structuredClone(before);
+  fixed.gemini.userAgent = 'GeminiCLI/0.34.0/gemini-2.5-pro (darwin; arm64; terminal)';
+  expect(userAgentConfigPatch(before, fixed)).toEqual({
+    upstream: { gemini: { 'header-defaults': { 'user-agent': fixed.gemini.userAgent } } },
+  });
+  expect(userAgentConfigPatch(fixed, before)).toEqual({
+    upstream: { gemini: { 'header-defaults': { 'user-agent': '' } } },
+  });
+  fixed.gemini.userAgent = 'x'.repeat(1025);
+  expect(validateUserAgentDraft(fixed)).toBe('invalid_ua');
+  fixed.gemini.userAgent = 'bad\r\nAuthorization: secret';
+  expect(validateUserAgentDraft(fixed)).toBe('invalid_ua');
 });
 
 test('validates UA and HTTP values and accepts an empty or IANA timezone', () => {
@@ -107,7 +128,7 @@ test('uses captured v8 connection and If-Match, without retrying conflicts', asy
       writes++;
       expect(request.headers['If-Match']).toBe('"revision"');
       expect(JSON.parse(request.data)).toEqual({
-        upstream: { claude: { 'header-defaults': { 'user-agent': '' } } },
+        upstream: { gemini: { 'header-defaults': { 'user-agent': '' } } },
       });
       throw new AxiosError('conflict', 'ERR_BAD_RESPONSE', request, undefined, {
         data: { error: 'conflict' },
@@ -127,10 +148,10 @@ test('uses captured v8 connection and If-Match, without retrying conflicts', asy
   });
   const snapshot = await api.load();
   const draft = structuredClone(snapshot.draft);
-  draft.claude.userAgent = '';
+  draft.gemini.userAgent = '';
   await expect(api.save(snapshot, draft)).rejects.toMatchObject({ status: 412 });
   expect(writes).toBe(1);
-  expect(draft.claude.userAgent).toBe('');
+  expect(draft.gemini.userAgent).toBe('');
   apiClient.setConfig({ apiBase: 'https://other.invalid', managementKey: 'other-key' });
   await expect(api.save(snapshot, draft)).rejects.toThrow('connection_changed');
   expect(writes).toBe(1);
@@ -139,12 +160,13 @@ test('uses captured v8 connection and If-Match, without retrying conflicts', asy
 test('missing ETag prevents writes; old status endpoints degrade without v0 fallback', async () => {
   const urls: string[] = [];
   let etag = '';
+  let status = 404;
   const api = transport(async (request) => {
     urls.push(request.url || '');
     if (request.url === '/client-user-agents/status')
       throw new AxiosError('missing', 'ERR_BAD_RESPONSE', request, undefined, {
         data: { error: 'missing' },
-        status: 404,
+        status,
         statusText: 'Not Found',
         headers: {},
         config: request,
@@ -156,6 +178,10 @@ test('missing ETag prevents writes; old status endpoints degrade without v0 fall
   const snapshot = await api.load();
   expect(snapshot.runtime).toBeNull();
   await expect(api.save({ ...snapshot, etag: '' }, snapshot.draft)).rejects.toThrow('missing_etag');
+  status = 503;
+  const unavailable = await api.load();
+  expect(unavailable.runtime).toBeNull();
+  expect(unavailable.draft.gemini.userAgent).toBe(config.upstream.gemini['header-defaults']['user-agent']);
   expect(urls.every((url) => url === '/config' || url === '/client-user-agents/status')).toBe(true);
 });
 
@@ -203,6 +229,27 @@ test('all seven locales cover the panel, with disabled controls and complete rul
       expect(rules).toContain('X-Anthropic-Additional-Protection');
       expect(rules).toContain('metadata.user_id');
       expect(rules).not.toContain('ua_panel.');
+      expect(resource.client_user_agents.gemini_scope).toBeTruthy();
+      expect(resource.client_user_agents.gemini_invalid_import).toBeTruthy();
+      const geminiDraft = readUserAgentDraft({});
+      geminiDraft.gemini.userAgent = 'auto';
+      const gemini = renderToStaticMarkup(
+        createElement(UserAgentSettings, {
+          provider: 'gemini',
+          draft: geminiDraft,
+          disabled: false,
+          onChange: () => {},
+        })
+      );
+      expect(gemini).toContain('@google/gemini-cli');
+      expect(gemini).toContain('0.34.0');
+      expect(gemini).not.toContain('X-Codex');
+      expect(gemini).not.toContain('X-Stainless');
+      expect(gemini).not.toContain('ua_panel.');
+      const geminiRules = renderToStaticMarkup(createElement(UserAgentRules, { provider: 'gemini' }));
+      expect(geminiRules).toContain('User-Agent');
+      expect(geminiRules).not.toContain('X-Codex');
+      expect(geminiRules).not.toContain('ua_panel.');
     }
   } finally {
     await i18n.changeLanguage(previous);

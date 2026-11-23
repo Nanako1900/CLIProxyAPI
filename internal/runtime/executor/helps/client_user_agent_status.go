@@ -54,13 +54,16 @@ func (cache *clientVersionCache) recordLookup(provider, result string, attempt, 
 // ClientUserAgentStatuses reads the same cache and baseline used by executors without I/O.
 func ClientUserAgentStatuses(cfg *config.Config) []ClientUserAgentStatus {
 	settings := userAgentSettings(cfg)
-	statuses := make([]ClientUserAgentStatus, 0, 2)
-	for _, provider := range []string{"claude", "codex"} {
+	statuses := make([]ClientUserAgentStatus, 0, 3)
+	for _, provider := range []string{"claude", "codex", "gemini"} {
 		status := ClientUserAgentStatus{
-			Provider: provider, Mode: "default", DefaultUserAgent: defaultClientUserAgent(provider),
-			BaselineHeaders: map[string]string{"User-Agent": defaultClientUserAgent(provider)},
+			Provider: provider, Mode: "default",
+			BaselineHeaders: map[string]string{},
 		}
-		if provider == "claude" {
+		status.Auto.RegistryURL = clientUserAgentRegistryURL(provider)
+		switch provider {
+		case "claude":
+			status.DefaultUserAgent = defaultClientUserAgent(provider)
 			profile := defaultClaudeDeviceProfile(cfg)
 			status.BaselineHeaders = map[string]string{
 				"User-Agent":                  profile.UserAgent,
@@ -72,19 +75,24 @@ func ClientUserAgentStatuses(cfg *config.Config) []ClientUserAgentStatus {
 			}
 			status.BillingVersion = DefaultClaudeVersion(cfg)
 			status.Auto.Enabled = settings.Claude
-			status.Auto.RegistryURL = "https://registry.npmjs.org/@anthropic-ai/claude-code/latest"
 			if cfg != nil {
 				status.ConfiguredUserAgent = strings.TrimSpace(cfg.ClaudeHeaderDefaults.UserAgent)
 				if value := cfg.ClaudeHeaderDefaults.Timeout; value != "" {
 					status.BaselineHeaders["X-Stainless-Timeout"] = value
 				}
 			}
-		} else {
+		case "codex":
+			status.DefaultUserAgent = DefaultCodexUserAgent
+			status.BaselineHeaders["User-Agent"] = DefaultCodexUserAgent
 			status.Auto.Enabled = settings.Codex
-			status.Auto.RegistryURL = "https://registry.npmjs.org/@openai/codex/latest"
 			if cfg != nil {
 				status.ConfiguredUserAgent = strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent)
 				status.BaselineHeaders["X-Codex-Beta-Features"] = cfg.CodexHeaderDefaults.BetaFeatures
+			}
+		case "gemini":
+			status.Auto.Enabled = settings.Gemini
+			if cfg != nil {
+				status.ConfiguredUserAgent = strings.TrimSpace(cfg.GeminiHeaderDefaults.UserAgent)
 			}
 		}
 		if status.ConfiguredUserAgent != "" {
@@ -99,7 +107,11 @@ func ClientUserAgentStatuses(cfg *config.Config) []ClientUserAgentStatus {
 		lookup := nativeClientVersions.lookups[provider]
 		nativeClientVersions.mu.RUnlock()
 		if status.Mode == "auto" {
-			status.ResolvedUserAgent = replaceClientUserAgentVersion(provider, status.ResolvedUserAgent, version)
+			if provider == "gemini" {
+				status.ResolvedUserAgent = geminiCLIUserAgent(version, "<model>")
+			} else {
+				status.ResolvedUserAgent = replaceClientUserAgentVersion(provider, status.ResolvedUserAgent, version)
+			}
 		} else if status.Mode == "fixed" {
 			status.ResolvedUserAgent = status.ConfiguredUserAgent
 		}

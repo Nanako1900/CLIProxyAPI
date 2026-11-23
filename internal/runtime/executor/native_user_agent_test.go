@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -166,6 +167,160 @@ func TestNativeUserAgentCodexOAuthDefaults(t *testing.T) {
 					}
 				default:
 					t.Fatalf("OAuth request did not reach upstream: %v", errCall)
+				}
+			})
+		}
+	}
+}
+
+func TestGeminiUserAgentNativeUpstream(t *testing.T) {
+	for _, provider := range []string{"gemini", "gemini-interactions", "vertex", "vertex-interactions"} {
+		for _, action := range []string{"execute", "stream", "count", "raw"} {
+			t.Run(provider+"/"+action, func(t *testing.T) {
+				cfg, err := config.ParseConfigBytes([]byte("upstream: {gemini: {header-defaults: {user-agent: 'configured/1'}}}"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				headers := make(chan http.Header, 1)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					headers <- r.Header.Clone()
+					w.WriteHeader(http.StatusTeapot)
+				}))
+				defer server.Close()
+				auth := &cliproxyauth.Auth{ID: "ua-test", Provider: provider, ProxyURL: "direct", Attributes: map[string]string{"api_key": "test", "base_url": server.URL}}
+				var e cliproxyauth.ProviderExecutor = NewGeminiExecutor(cfg)
+				if strings.HasPrefix(provider, "vertex") {
+					auth.Provider = "vertex"
+					e = NewGeminiVertexExecutor(cfg)
+				}
+				req := coreexecutor.Request{Model: "gemini-test", Payload: []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)}
+				opts := coreexecutor.Options{SourceFormat: sdktranslator.FormatGemini}
+				if strings.HasSuffix(provider, "-interactions") {
+					auth.Attributes["interactions"] = "true"
+					req.Payload = []byte(`{"model":"gemini-test","input":"hello"}`)
+					opts.SourceFormat = sdktranslator.FormatInteractions
+				}
+				want := "configured/1"
+				switch action {
+				case "execute":
+					auth.Attributes["header:uSeR-AGENT"] = "auto"
+					_, err = e.Execute(t.Context(), auth, req, opts)
+					want = "auto"
+				case "stream":
+					opts.Stream = true
+					auth.Attributes["header:User-Agent"] = "$X-Client-UA"
+					opts.Headers = http.Header{"X-Client-Ua": {"mapped/4"}}
+					want = "mapped/4"
+					_, err = e.ExecuteStream(t.Context(), auth, req, opts)
+				case "count":
+					auth.Attributes["header:User-Agent"] = "$Missing"
+					_, err = e.CountTokens(t.Context(), auth, req, opts)
+				case "raw":
+					auth.Attributes["header:User-Agent"] = "auto"
+					raw, errNew := http.NewRequest(http.MethodPost, server.URL+"/v1/models/gemini-test:generateContent", nil)
+					if errNew != nil {
+						t.Fatal(errNew)
+					}
+					resp, errRaw := e.HttpRequest(t.Context(), auth, raw)
+					if errRaw != nil {
+						t.Fatal(errRaw)
+					}
+					resp.Body.Close()
+					want = "auto"
+				}
+				var got http.Header
+				select {
+				case got = <-headers:
+					if got.Get("X-Goog-Api-Key") != "test" {
+						t.Fatal("native credential changed")
+					}
+				default:
+					t.Fatalf("request did not reach native upstream: %v", err)
+				}
+				ua := got.Get("User-Agent")
+				if want == "auto" {
+					if !strings.HasPrefix(ua, "GeminiCLI/") || !strings.Contains(ua, "/gemini-test (") || !strings.HasSuffix(ua, "; terminal)") {
+						t.Errorf("invalid resolved UA: %q", ua)
+					}
+				} else if ua != want {
+					t.Errorf("User-Agent = %q, want %q", ua, want)
+				}
+			})
+		}
+	}
+}
+
+func TestGeminiUserAgentRawSDKPreservesOriginal(t *testing.T) {
+	for _, tc := range []struct{ provider, path, configured, override string }{
+		{"gemini", "/v1/models/gemini-test:generateContent", "", ""},
+		{"gemini", "/v1/models/gemini-test:generateContent", "", "bad\nvalue"},
+		{"vertex", "/v1/endpoints/openapi/chat/completions", "operator/1", "auto"},
+		{"vertex", "/v1/endpoints/openapi/models", "operator/1", "auto"},
+	} {
+		cfg := &config.Config{GeminiHeaderDefaults: config.GeminiHeaderDefaults{UserAgent: tc.configured}}
+		auth := &cliproxyauth.Auth{Provider: tc.provider, Attributes: map[string]string{"api_key": "key", "header:User-Agent": tc.override}}
+		req := httptest.NewRequest(http.MethodPost, tc.path, nil)
+		req.Header.Set("User-Agent", "existing/4")
+		var err error
+		if tc.provider == "gemini" {
+			err = NewGeminiExecutor(cfg).PrepareRequest(req, auth)
+		} else {
+			err = NewGeminiVertexExecutor(cfg).PrepareRequest(req, auth)
+		}
+		if err != nil || req.UserAgent() != "existing/4" {
+			t.Errorf("SDK %s %s: got %q, %v", tc.provider, tc.path, req.UserAgent(), err)
+		}
+	}
+}
+
+func TestGeminiUserAgentRawInteractionsBody(t *testing.T) {
+	const modelJSON = `{"model":"gemini-2.5-pro","input":"hello"}`
+	for _, provider := range []string{"gemini", "vertex"} {
+		for _, tc := range []struct {
+			name, setting, body, want string
+			replayable, inspect       bool
+		}{
+			{"model", "auto", modelJSON, "/gemini-2.5-pro (", true, true},
+			{"large prompt", "auto", `{"model":"gemini-2.5-pro","input":"` + strings.Repeat("a", 1<<17) + `"}`, "/gemini-2.5-pro (", true, true},
+			{"nonstring", "auto", `{"model":42,"input":"hello"}`, "/unknown (", true, true},
+			{"agent", "auto", `{"agent":"agents/deep-research","input":"hello"}`, "/unknown (", true, true},
+			{"opaque", "auto", modelJSON, "/unknown (", false, false},
+			{"fixed", "myclient/1", modelJSON, "myclient/1", true, false},
+			{"default", "", modelJSON, "original/1", true, false},
+		} {
+			t.Run(provider+"/"+tc.name, func(t *testing.T) {
+				cfg := &config.Config{GeminiHeaderDefaults: config.GeminiHeaderDefaults{UserAgent: tc.setting}}
+				auth := &cliproxyauth.Auth{Provider: provider, Attributes: map[string]string{"api_key": "key"}}
+				path := "/v1beta/interactions"
+				if provider == "vertex" {
+					path = "/v1beta1/interactions"
+				}
+				req, err := http.NewRequest(http.MethodPost, "https://example.invalid"+path, strings.NewReader(tc.body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				req.Header.Set("User-Agent", "original/1")
+				inspected := false
+				replay := req.GetBody
+				req.GetBody = nil
+				if tc.replayable {
+					req.GetBody = func() (io.ReadCloser, error) { inspected = true; return replay() }
+				}
+				length, original := req.ContentLength, req.Body
+				if provider == "vertex" {
+					err = NewGeminiVertexExecutor(cfg).PrepareRequest(req, auth)
+				} else {
+					err = NewGeminiInteractionsExecutor(cfg).PrepareRequest(req, auth)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(req.UserAgent(), tc.want) || inspected != tc.inspect {
+					t.Errorf("got UA %q, inspected %t; want %q, %t", req.UserAgent(), inspected, tc.want, tc.inspect)
+				}
+				data, errRead := io.ReadAll(req.Body)
+				if errRead != nil || req.Body != original || string(data) != tc.body || req.ContentLength != length {
+					t.Error("raw request body or length changed")
 				}
 			})
 		}

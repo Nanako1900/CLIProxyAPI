@@ -25,7 +25,10 @@ sidebar page with seven locales. It leaves searchable links in the Advanced head
 section. The page combines provider defaults, automatic release lookup history,
 credential overrides, searchable samples, editable identity policies and a header
 construction reference. Saved runtime state is separate from the draft; saves
-patch only changed leaves with ETag and connection-revision guards.
+patch only changed leaves with ETag and connection-revision guards. The Gemini
+tab controls User-Agent for native Gemini, Interactions, native Vertex AI and
+Gemini CLI OAuth inference through the optional plugin. The Gemini sample picker
+sends and displays only User-Agent.
 `overlay/` contains the new React component, API adapter,
 configuration mapping, styles, and regression tests. It uses the existing v8
 management client, connection guards, controls, and configuration save flow. It
@@ -60,8 +63,10 @@ layout at a narrow viewport and that changing connections clears old samples.
 
 See [the user guide](../../docs/user-agent-settings.md) for usage and scope.
 For the UA panel, also verify provider switching, sample search/source filtering,
-the old Advanced links, review of both providers' changes, conflict draft retention,
-and narrow-screen layout. Runtime reports exclude credential secrets and describe
+the old Advanced links, review of changes across providers, conflict draft retention,
+and narrow-screen layout. On the Gemini tab, verify the channel default, an exact
+fixed User-Agent, Auto with the resolved upstream model and CPA platform, and a
+credential override. Runtime reports exclude credential secrets and describe
 defaults rather than a captured outbound request. The status API is read-only and
 never triggers npm lookups.
 See [OAuth account proxies](../../docs/oauth-account-proxies.md) for login routing

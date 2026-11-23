@@ -161,6 +161,11 @@ func (c ClaudeConfig) SessionDatePinRetention() time.Duration {
 	return time.Duration(days) * 24 * time.Hour
 }
 
+// GeminiHeaderDefaults configures the optional User-Agent for native Gemini requests.
+type GeminiHeaderDefaults struct {
+	UserAgent string `yaml:"user-agent,omitempty" json:"user-agent,omitempty"`
+}
+
 // ClaudeHeaderDefaults configures the measured Claude Code software baseline.
 // A nonempty UserAgent is a final override (or "auto" for stable client version
 // tracking); credential User-Agent headers take precedence. Empty keeps native behavior.

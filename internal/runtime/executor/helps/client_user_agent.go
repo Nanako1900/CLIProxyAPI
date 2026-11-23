@@ -35,6 +35,7 @@ type clientUserAgentLookup struct {
 var nativeClientVersions = clientVersionCache{versions: map[string]string{
 	"codex":  "0.154.0",
 	"claude": "2.1.280",
+	"gemini": "0.34.0",
 }}
 
 func (cache *clientVersionCache) get(provider string) string {
@@ -178,6 +179,41 @@ func claudeUserAgentCommentFields(comment string) []string {
 	return fields
 }
 
+// IsUserAgentAttribute identifies a credential header that would set User-Agent.
+func IsUserAgentAttribute(key string) bool {
+	prefix, name, ok := strings.Cut(key, ":")
+	return ok && strings.EqualFold(prefix, "header") && strings.EqualFold(strings.TrimSpace(name), "User-Agent")
+}
+
+func credentialUserAgentAttribute(auth *cliproxyauth.Auth) string {
+	if auth != nil {
+		for key, raw := range auth.Attributes {
+			if IsUserAgentAttribute(key) && config.ValidUserAgent(raw) {
+				return strings.TrimSpace(raw)
+			}
+		}
+	}
+	return ""
+}
+
+// resolveCredentialUserAgent shares the downstream header and session-variable
+// resolution used by other credential headers, validating the expanded value.
+func resolveCredentialUserAgent(ctx context.Context, raw string, clientHeaders http.Header) string {
+	if raw == "" || !strings.Contains(raw, "$") {
+		return raw
+	}
+	req := &http.Request{Header: make(http.Header)}
+	if ctx != nil {
+		req = req.WithContext(ctx)
+	}
+	util.ApplyCustomHeadersFromAttrs(req, map[string]string{"header:User-Agent": raw}, clientHeaders)
+	value := req.Header.Get("User-Agent")
+	if !config.ValidUserAgent(value) {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
 // ApplyConfiguredUserAgent is the final UA boundary after native/model headers.
 // Credential overrides take precedence over provider settings. Only UA is changed.
 func ApplyConfiguredUserAgent(ctx context.Context, headers http.Header, cfg *config.Config, auth *cliproxyauth.Auth, provider string, clientHeaders http.Header) {
@@ -192,22 +228,8 @@ func ApplyConfiguredUserAgent(ctx context.Context, headers http.Header, cfg *con
 			value = cfg.CodexHeaderDefaults.UserAgent
 		}
 	}
-	if auth != nil {
-		// Reuse header-variable resolution while excluding all other header mutations.
-		attrs := make(map[string]string)
-		for name, raw := range auth.Attributes {
-			if strings.EqualFold(name, "header:User-Agent") {
-				attrs[name] = raw
-			}
-		}
-		request := &http.Request{Header: make(http.Header)}
-		if ctx != nil {
-			request = request.WithContext(ctx)
-		}
-		util.ApplyCustomHeadersFromAttrs(request, attrs, clientHeaders)
-		if override := request.Header.Get("User-Agent"); strings.TrimSpace(override) != "" && config.ValidUserAgent(override) {
-			value = override
-		}
+	if override := resolveCredentialUserAgent(ctx, credentialUserAgentAttribute(auth), clientHeaders); override != "" {
+		value = override
 	}
 	if !config.ValidUserAgent(value) || strings.TrimSpace(value) == "" {
 		return
@@ -217,6 +239,10 @@ func ApplyConfiguredUserAgent(ctx context.Context, headers http.Header, cfg *con
 	if provider == "claude" {
 		value = carryClaudeRequestFields(value, current)
 	}
+	setClientUserAgent(headers, value)
+}
+
+func setClientUserAgent(headers http.Header, value string) {
 	for name := range headers {
 		if strings.EqualFold(name, "User-Agent") {
 			delete(headers, name)

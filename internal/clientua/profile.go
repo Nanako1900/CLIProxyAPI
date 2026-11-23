@@ -17,6 +17,7 @@ import (
 const MaxImportBytes = 32 << 10
 
 var userAgentPattern = regexp.MustCompile(`^(claude-cli|codex-tui|codex_cli_rs|codex_exec|codex_vscode|codex|Codex Desktop)/([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)(?:[ (].*)?$`)
+var geminiUserAgentPattern = regexp.MustCompile(`^GeminiCLI/([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)/(?:[^ ]+|[^ ].* \([^()]*\))$`)
 var softwareVersionPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
 
 var claudeHeaders = []string{"User-Agent", "X-Stainless-Package-Version", "X-Stainless-Runtime-Version", "X-Stainless-Os", "X-Stainless-Arch", "X-Stainless-Timeout"}
@@ -30,7 +31,9 @@ type Profile struct {
 	Headers  map[string]string `json:"headers" yaml:"headers"`
 }
 
-func ValidProvider(provider string) bool { return provider == "claude" || provider == "codex" }
+func ValidProvider(provider string) bool {
+	return provider == "claude" || provider == "codex" || provider == "gemini"
+}
 
 func headerValue(headers http.Header, name string) (string, error) {
 	value := ""
@@ -60,9 +63,12 @@ func FromHeaders(headers http.Header) (Profile, error) {
 	if errHeader != nil {
 		return Profile{}, errHeader
 	}
+	if match := geminiUserAgentPattern.FindStringSubmatch(ua); match != nil {
+		return Profile{Provider: "gemini", Version: match[1], Headers: map[string]string{"User-Agent": ua}}, nil
+	}
 	match := userAgentPattern.FindStringSubmatch(ua)
 	if len(match) != 3 {
-		return Profile{}, fmt.Errorf("a Claude Code or Codex User-Agent with a version is required")
+		return Profile{}, fmt.Errorf("a Claude Code, Codex, or Gemini CLI User-Agent with a version is required")
 	}
 	provider, allowed := "codex", codexHeaders
 	if match[1] == "claude-cli" {

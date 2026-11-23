@@ -39,6 +39,7 @@ type PayloadReplacement = internalconfig.PayloadReplacement
 type PayloadModelRule = internalconfig.PayloadModelRule
 
 type ProxyConnectionPoolConfig = internalconfig.ProxyConnectionPoolConfig
+type GeminiHeaderDefaults = internalconfig.GeminiHeaderDefaults
 type GeminiKey = internalconfig.GeminiKey
 type CodexKey = internalconfig.CodexKey
 type XAIKey = internalconfig.XAIKey

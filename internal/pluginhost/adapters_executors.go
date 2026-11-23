@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"sort"
 	"strconv"
@@ -1021,7 +1022,7 @@ func (a *executorAdapter) Execute(ctx context.Context, auth *coreauth.Auth, req 
 		reporter.StartResponseTTFT()
 	}
 
-	pluginResp, errExecute := a.executor.Execute(ctx, buildExecutorRequest(a.host, a.provider, auth, prepared.req, prepared.opts))
+	pluginResp, errExecute := a.executor.Execute(ctx, a.buildExecutorRequest(ctx, auth, prepared.req, prepared.opts))
 	if errExecute != nil {
 		return coreexecutor.Response{}, errExecute
 	}
@@ -1079,7 +1080,7 @@ func (a *executorAdapter) ExecuteStream(ctx context.Context, auth *coreauth.Auth
 		reporter.StartResponseTTFT()
 	}
 
-	pluginResp, errExecuteStream := a.executor.ExecuteStream(ctx, buildExecutorRequest(a.host, a.provider, auth, prepared.req, prepared.opts))
+	pluginResp, errExecuteStream := a.executor.ExecuteStream(ctx, a.buildExecutorRequest(ctx, auth, prepared.req, prepared.opts))
 	if errExecuteStream != nil {
 		return nil, errExecuteStream
 	}
@@ -1305,7 +1306,7 @@ func (a *executorAdapter) CountTokens(ctx context.Context, auth *coreauth.Auth, 
 	if errPrepare != nil {
 		return coreexecutor.Response{}, errPrepare
 	}
-	pluginResp, errCountTokens := a.executor.CountTokens(ctx, buildExecutorRequest(a.host, a.provider, auth, prepared.req, prepared.opts))
+	pluginResp, errCountTokens := a.executor.CountTokens(ctx, a.buildExecutorRequest(ctx, auth, prepared.req, prepared.opts))
 	if errCountTokens != nil {
 		return coreexecutor.Response{}, errCountTokens
 	}
@@ -1373,7 +1374,7 @@ func (a *executorAdapter) HttpRequest(ctx context.Context, auth *coreauth.Auth, 
 	if errReadAll != nil {
 		return nil, fmt.Errorf("read plugin http request body: %w", errReadAll)
 	}
-	pluginResp, errHTTPRequest := a.executor.HttpRequest(ctx, pluginapi.ExecutorHTTPRequest{
+	pluginReq := pluginapi.ExecutorHTTPRequest{
 		AuthID:       authID(auth),
 		AuthProvider: authProvider(auth),
 		Method:       req.Method,
@@ -1384,7 +1385,15 @@ func (a *executorAdapter) HttpRequest(ctx context.Context, auth *coreauth.Auth, 
 		Metadata:     cloneAnyMap(authMetadata(auth)),
 		Attributes:   authAttributes(auth),
 		HTTPClient:   a.host.newHTTPClient(auth, a.provider),
-	})
+	}
+	if a.provider == "gemini-cli" && (req.Method == http.MethodPost || req.Method == "") {
+		switch req.URL.Path {
+		case "/v1internal:generateContent", "/v1internal:streamGenerateContent", "/v1internal:countTokens":
+			model := geminiCLIRawRequestModel(req.URL.Path, body)
+			pluginReq.Attributes = a.applyGeminiCLIUserAgent(ctx, auth, model, req.Header, pluginReq.Attributes, pluginReq.Metadata)
+		}
+	}
+	pluginResp, errHTTPRequest := a.executor.HttpRequest(ctx, pluginReq)
 	if errHTTPRequest != nil {
 		return nil, errHTTPRequest
 	}
@@ -1402,8 +1411,19 @@ func (a *executorAdapter) HttpRequest(ctx context.Context, auth *coreauth.Auth, 
 	return resp, nil
 }
 
-func buildExecutorRequest(host *Host, provider string, auth *coreauth.Auth, req coreexecutor.Request, opts coreexecutor.Options) pluginapi.ExecutorRequest {
-	return pluginapi.ExecutorRequest{
+func geminiCLIRawRequestModel(path string, body []byte) string {
+	if path == "/v1internal:countTokens" {
+		// Code Assist wraps token counts in a request with a models/ resource name.
+		nested := ojson.GetBytesNoCopy(body, "request.model")
+		if nested.Type == ojson.String && nested.Str != "" {
+			return strings.TrimPrefix(nested.Str, "models/")
+		}
+	}
+	return ojson.GetBytesNoCopy(body, "model").String()
+}
+
+func (a *executorAdapter) buildExecutorRequest(ctx context.Context, auth *coreauth.Auth, req coreexecutor.Request, opts coreexecutor.Options) pluginapi.ExecutorRequest {
+	pluginReq := pluginapi.ExecutorRequest{
 		AuthID:          authID(auth),
 		AuthProvider:    authProvider(auth),
 		Model:           req.Model,
@@ -1419,8 +1439,38 @@ func buildExecutorRequest(host *Host, provider string, auth *coreauth.Auth, req 
 		StorageJSON:     storageJSONFromAuth(auth),
 		AuthMetadata:    cloneAnyMap(authMetadata(auth)),
 		AuthAttributes:  authAttributes(auth),
-		HTTPClient:      host.newHTTPClientWithProxy(auth, opts.ProxyURL, provider),
+		HTTPClient:      a.host.newHTTPClientWithProxy(auth, opts.ProxyURL, a.provider),
 	}
+	if a.provider == "gemini-cli" {
+		pluginReq.AuthAttributes = a.applyGeminiCLIUserAgent(ctx, auth, req.Model, opts.Headers, pluginReq.AuthAttributes, pluginReq.AuthMetadata)
+	}
+	return pluginReq
+}
+
+// The Gemini CLI plugin applies metadata headers after attributes. Remove all
+// spellings of the raw setting from the request copies before adding its value.
+func (a *executorAdapter) applyGeminiCLIUserAgent(ctx context.Context, auth *coreauth.Auth, model string, headers http.Header, attrs map[string]string, metadata map[string]any) map[string]string {
+	value := helps.ResolveGeminiUserAgent(ctx, a.host.currentRuntimeConfig(), auth, model, headers)
+	maps.DeleteFunc(attrs, func(key, _ string) bool { return helps.IsUserAgentAttribute(key) })
+	switch custom := metadata["headers"].(type) {
+	case map[string]string:
+		metadata["headers"] = withoutPluginUserAgent(custom)
+	case map[string]any:
+		metadata["headers"] = withoutPluginUserAgent(custom)
+	}
+	if value != "" {
+		if attrs == nil {
+			attrs = make(map[string]string)
+		}
+		attrs["header:User-Agent"] = value
+	}
+	return attrs
+}
+
+func withoutPluginUserAgent[T any](headers map[string]T) map[string]T {
+	clone := maps.Clone(headers)
+	maps.DeleteFunc(clone, func(key string, _ T) bool { return strings.EqualFold(strings.TrimSpace(key), "User-Agent") })
+	return clone
 }
 
 func storageJSONFromAuth(auth *coreauth.Auth) []byte {

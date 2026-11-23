@@ -20,6 +20,7 @@ export type ClaudeIdentityDraft = {
 export type UserAgentDraft = {
   claude: ClaudeIdentityDraft;
   codex: { userAgent: string; betaFeatures: string };
+  gemini: { userAgent: string };
 };
 export type UserAgentProviderStatus = {
   provider: ClientProvider;
@@ -90,10 +91,17 @@ const claudeFields = {
   betaAppend: 'anthropic-beta-append',
 } as const;
 const listFields = new Set(['nativeEntrypoints', 'betaStrip', 'betaAppend']);
+const providerFields = {
+  claude: claudeFields,
+  codex: { userAgent: 'user-agent', betaFeatures: 'beta-features' },
+  gemini: { userAgent: 'user-agent' },
+} as const;
 
 export function readUserAgentDraft(config: Record<string, unknown>): UserAgentDraft {
-  const claude = object(object(object(config.upstream).claude)['header-defaults']);
+  const upstream = object(config.upstream);
+  const claude = object(object(upstream.claude)['header-defaults']);
   const codex = object(object(object(object(config.oauth).providers).codex)['header-defaults']);
+  const gemini = object(object(upstream.gemini)['header-defaults']);
   return {
     claude: {
       userAgent: text(claude['user-agent']),
@@ -111,18 +119,15 @@ export function readUserAgentDraft(config: Record<string, unknown>): UserAgentDr
       betaAppend: lines(claude['anthropic-beta-append']),
     },
     codex: { userAgent: text(codex['user-agent']), betaFeatures: text(codex['beta-features']) },
+    gemini: { userAgent: text(gemini['user-agent']) },
   };
 }
 
 export function userAgentChanges(before: UserAgentDraft, after: UserAgentDraft) {
   const changes: { provider: ClientProvider; field: string; before: unknown; after: unknown }[] =
     [];
-  for (const provider of ['claude', 'codex'] as const) {
-    const fields =
-      provider === 'claude'
-        ? claudeFields
-        : { userAgent: 'user-agent', betaFeatures: 'beta-features' };
-    for (const [key, field] of Object.entries(fields)) {
+  for (const provider of ['claude', 'codex', 'gemini'] as const) {
+    for (const [key, field] of Object.entries(providerFields[provider])) {
       const normalize = (draft: UserAgentDraft) => {
         const value = (draft[provider] as unknown as Record<string, string | boolean>)[key];
         return typeof value === 'string'
@@ -142,12 +147,21 @@ export function userAgentChanges(before: UserAgentDraft, after: UserAgentDraft) 
 
 // Patch only edited leaves so unrelated and future header defaults survive a save.
 export function userAgentConfigPatch(before: UserAgentDraft, after: UserAgentDraft) {
-  const headers: Record<ClientProvider, Record<string, unknown>> = { claude: {}, codex: {} };
+  const headers: Record<ClientProvider, Record<string, unknown>> = {
+    claude: {},
+    codex: {},
+    gemini: {},
+  };
   for (const change of userAgentChanges(before, after))
     headers[change.provider][change.field] = change.after;
+  const upstream = Object.fromEntries(
+    (['claude', 'gemini'] as const)
+      .filter((provider) => Object.keys(headers[provider]).length)
+      .map((provider) => [provider, { 'header-defaults': headers[provider] }])
+  );
   return {
-    ...(Object.keys(headers.claude).length
-      ? { upstream: { claude: { 'header-defaults': headers.claude } } }
+    ...(Object.keys(upstream).length
+      ? { upstream }
       : {}),
     ...(Object.keys(headers.codex).length
       ? { oauth: { providers: { codex: { 'header-defaults': headers.codex } } } }
@@ -155,9 +169,13 @@ export function userAgentConfigPatch(before: UserAgentDraft, after: UserAgentDra
   };
 }
 
+export function isValidUserAgent(value: string): boolean {
+  return value.length <= 1024 && !/[^\x20-\x7e]/.test(value);
+}
+
 export function validateUserAgentDraft(draft: UserAgentDraft): string | null {
-  for (const value of [draft.claude.userAgent, draft.codex.userAgent]) {
-    if (value.length > 1024 || /[^\x20-\x7e]/.test(value)) return 'invalid_ua';
+  for (const { userAgent } of Object.values(draft)) {
+    if (!isValidUserAgent(userAgent)) return 'invalid_ua';
   }
   for (const value of [
     draft.claude.packageVersion,
@@ -191,10 +209,7 @@ export function userAgentPanelConnection() {
       assertCurrent();
       const [response, runtime] = await Promise.all([
         client.getRaw('/config'),
-        client.get<UserAgentRuntime>('/client-user-agents/status').catch((error: unknown) => {
-          if ((error as { status?: number }).status === 404) return null;
-          throw error;
-        }),
+        client.get<UserAgentRuntime>('/client-user-agents/status').catch(() => null),
       ]);
       assertCurrent();
       const etag = response.headers.etag;

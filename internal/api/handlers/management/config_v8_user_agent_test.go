@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 )
@@ -62,5 +63,52 @@ func TestConfigV8UserAgentSaveReloadAndInvalidValue(t *testing.T) {
 	after, errRead := os.ReadFile(path)
 	if errRead != nil || string(after) != string(saved) {
 		t.Fatal("invalid save changed the configuration")
+	}
+}
+
+func TestConfigV8GeminiUserAgentRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("config-version: 8\nupstream: {claude: {header-defaults: {user-agent: claude-existing}}}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{cfg: cfg, configFilePath: path}
+	router := gin.New()
+	const endpoint = "/v8/management/config"
+	router.PATCH(endpoint, h.ConfigV8)
+	router.GET(endpoint, h.ConfigV8)
+	for _, ua := range []string{"team-identity", "auto", "bad\\r\\nHeader: injected", ""} {
+		before, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := httptest.NewRecorder()
+		body := `{"upstream":{"gemini":{"header-defaults":{"user-agent":"` + ua + `"}}}}`
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodPatch, endpoint, strings.NewReader(body)))
+		after, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(ua, "bad") {
+			if response.Code != http.StatusUnprocessableEntity || string(before) != string(after) {
+				t.Fatalf("invalid UA write: %d %s", response.Code, response.Body)
+			}
+			continue
+		}
+		if response.Code != http.StatusOK {
+			t.Fatalf("setting %q: %d %s", ua, response.Code, response.Body)
+		}
+		get := httptest.NewRecorder()
+		router.ServeHTTP(get, httptest.NewRequest(http.MethodGet, endpoint, nil))
+		if get.Code != http.StatusOK || ojson.Get(get.Body.String(), "upstream.gemini.header-defaults.user-agent").String() != ua || ojson.Get(get.Body.String(), "upstream.claude.header-defaults.user-agent").String() != "claude-existing" {
+			t.Fatalf("read back %q: %d %s", ua, get.Code, get.Body)
+		}
+		loaded, err := config.LoadConfig(path)
+		if err != nil || loaded.GeminiHeaderDefaults.UserAgent != ua || loaded.ClaudeHeaderDefaults.UserAgent != "claude-existing" {
+			t.Fatalf("saved configuration did not retain %q: %v", ua, err)
+		}
 	}
 }

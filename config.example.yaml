@@ -627,6 +627,13 @@ upstream:
     #   # the caller's value and never synthesizes one, "off" never sends the header.
     #   client-request-id: "on"
 
+  # Shared inference User-Agent for Gemini, Interactions, native Vertex and the Gemini CLI OAuth plugin.
+  # Leave empty for each channel's default, enter a fixed UA, or use "auto" to track @google/gemini-cli.
+  # Auto includes the upstream model and the proxy's OS and architecture. Credential headers.User-Agent takes precedence.
+  # gemini:
+  #   header-defaults:
+  #     user-agent: "auto"
+
   xai:
     # When true, inject the native x_search tool when the request does not declare it.
     # The injected tool is also added to tool_choice.allowed_tools when applicable.

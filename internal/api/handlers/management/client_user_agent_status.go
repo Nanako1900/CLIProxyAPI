@@ -29,23 +29,20 @@ func (h *Handler) ClientUserAgentStatus(c *gin.Context) {
 	overrides := make([]override, 0)
 	if h.authManager != nil {
 		for _, auth := range h.authManager.List() {
-			if auth == nil || !clientua.ValidProvider(auth.Provider) {
+			provider, value := credentialUserAgentOverride(auth)
+			if value == "" {
 				continue
 			}
-			for name, value := range auth.Attributes {
-				if !strings.EqualFold(name, "header:User-Agent") || strings.TrimSpace(value) == "" {
-					continue
-				}
-				source := "credential"
-				if coreauth.IsConfigAPIKeyAuth(auth) {
-					source = "config"
-				}
-				label := auth.Label
-				if label == "" {
-					label = auth.Index
-				}
-				overrides = append(overrides, override{auth.Provider, auth.Index, label, source, value, auth.Disabled})
+			source := "credential"
+			if coreauth.IsConfigAPIKeyAuth(auth) {
+				source = "config"
 			}
+			label := auth.Label
+			// Gemini credential labels can include an account email, project ID, or file path.
+			if label == "" || (provider == "gemini" && source == "credential") {
+				label = auth.Index
+			}
+			overrides = append(overrides, override{provider, auth.Index, label, source, value, auth.Disabled})
 		}
 	}
 	sort.Slice(overrides, func(i, j int) bool {
@@ -71,4 +68,21 @@ func (h *Handler) ClientUserAgentStatus(c *gin.Context) {
 		"catalogPersistence":         persistence,
 		"catalogLimit":               clientua.LimitPerProvider,
 	})
+}
+
+func credentialUserAgentOverride(auth *coreauth.Auth) (provider, value string) {
+	if auth == nil {
+		return "", ""
+	}
+	switch auth.Provider {
+	case "gemini", "gemini-interactions", "gemini-cli", "vertex":
+		return "gemini", helps.GeminiCredentialUserAgent(auth)
+	case "claude", "codex":
+		for key, raw := range auth.Attributes {
+			if strings.EqualFold(key, "header:User-Agent") && strings.TrimSpace(raw) != "" {
+				return auth.Provider, raw
+			}
+		}
+	}
+	return "", ""
 }

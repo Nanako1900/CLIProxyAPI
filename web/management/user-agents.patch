@@ -260,7 +260,7 @@ diff --git a/src/features/config/components/sections/SectionAdvanced.tsx b/src/f
 diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
 --- a/src/i18n/locales/en.json
 +++ b/src/i18n/locales/en.json
-@@ -2482,7 +2482,7 @@
+@@ -2482,7 +2482,10 @@
      "title": "{{provider}} client UA list",
      "refresh": "Refresh list",
      "import": "Import request headers",
@@ -268,8 +268,11 @@ diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
 +    "description": "Collected from authenticated client requests to CPA. UA is client-declared, not proof of authenticity. Select a sample to fill the identity draft.",
      "claude_scope": "Applies to Claude OAuth and API keys. A credential’s custom User-Agent takes priority.",
      "codex_scope": "Applies to Codex OAuth. Codex API keys use their own custom User-Agent header.",
++    "gemini_scope": "Only the Gemini CLI User-Agent is applied to the draft.",
++    "gemini_import_hint": "Paste a header block or a raw HTTP request (up to 32 KiB). Only User-Agent is sent and stored. Import creates a sample for preview and selection.",
++    "gemini_invalid_import": "Paste headers containing a Gemini CLI User-Agent, up to 32 KiB.",
      "select": "Select {{provider}} User-Agent",
-@@ -2695,5 +2695,180 @@
+@@ -2695,5 +2698,193 @@
      "reason_long_remaining": "Long-window remaining",
      "reason_id": "Stable identifier",
      "reason_unknown": "Other reason"
@@ -330,6 +333,19 @@ diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
 +    "auto_scope": "Auto changes only the final User-Agent version. SDK, Node, platform, agent-sdk suffix, payload and TLS behavior retain their own rules.",
 +    "scope_claude": "Applies to Claude OAuth and API-key requests, including streaming and upstream token counting. Fixed provider UA also participates in baseline detection and generated billing versions.",
 +    "scope_codex": "Applies to Codex OAuth/file-backed credentials across HTTP, streaming, images, compact and WebSocket. Codex API-key groups use their own credential headers.",
++    "scope_gemini": "Applies to the native Gemini API, Interactions, native Vertex AI and optional Gemini CLI OAuth inference.",
++    "gemini_ua_hint": "Enter a complete User-Agent for fixed mode. An empty value keeps the channel default. A credential’s User-Agent takes precedence.",
++    "gemini_auto_scope": "Auto uses the cached stable @google/gemini-cli release or the built-in 0.34.0 fallback. CPA builds the User-Agent from that version, the resolved upstream model and the platform where CPA runs.",
++    "gemini_channel_default": "Channel default",
++    "gemini_baseline_hint": "This baseline uses the saved setting without a selected credential. Auto is a preview. The upstream model is resolved per request, and the platform comes from CPA.",
++    "gemini_updater_hint": "Global auto or an eligible configured API key with auto starts stable npm lookups. File-backed overrides use the cached version or the built-in fallback. Failed lookups retain the cache, which resets when CPA restarts.",
++    "gemini_catalog_hint": "From authenticated /v1, /v1beta and /backend-api/codex requests, CPA records only the Gemini CLI User-Agent. Save the draft to apply a sample. Deleting a sample leaves saved settings in place.",
++    "gemini_runtime_unavailable": "Gemini runtime status is unavailable. You can still edit the draft.",
++    "gemini_search_samples": "Search User-Agent",
++    "priority_gemini_provider_hint": "Fixed uses the configured User-Agent. Auto generates it using the cached CLI version, upstream model and CPA platform.",
++    "priority_gemini_native_hint": "An empty setting keeps the channel default. Native requests use the Go HTTP/1.1 or HTTP/2 User-Agent. The optional Gemini CLI plugin keeps its existing User-Agent.",
++    "rule_gemini_origin_title": "Inference scope",
++    "rule_gemini_origin": "Antigravity, Vertex OpenAI compatibility, the AI Studio relay and OAuth or other control-plane operations each use their own identity rules.",
 +    "field_packageVersion": "SDK package version",
 +    "field_runtimeVersion": "Node runtime version",
 +    "field_os": "Operating system",
@@ -435,7 +451,7 @@ diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
 +    "discard": "Discard changes",
 +    "discard_hint": "Discard the unsaved identity settings and reload or leave this page?",
 +    "saved": "Settings saved. Subsequent requests use the reloaded configuration; existing WebSocket handshakes remain until reconnecting.",
-+    "save_hint": "Only the fields below are patched. Review both providers before saving. Credential overrides still take precedence. Changes apply after configuration reload.",
++    "save_hint": "Review the fields below before saving. Only these fields are patched. Credential overrides take precedence. Changes apply after configuration reload.",
 +    "before": "Saved value",
 +    "after": "New value",
 +    "conflict": "Configuration changed elsewhere. Your draft is retained. Refresh, review the latest state and reapply your changes.",
@@ -453,7 +469,7 @@ diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
 diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
 --- a/src/i18n/locales/zh-CN.json
 +++ b/src/i18n/locales/zh-CN.json
-@@ -2480,7 +2480,7 @@
+@@ -2480,7 +2480,10 @@
      "title": "{{provider}} 客户端 UA 列表",
      "refresh": "刷新列表",
      "import": "导入请求头",
@@ -461,8 +477,11 @@ diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
 +    "description": "从连接到 CPA 且通过认证的客户端请求中采集。UA 由客户端声明，并非官方身份验证。选择样本可填入身份配置草稿。",
      "claude_scope": "适用于 Claude OAuth 和 API Key。凭据单独设置的 User-Agent 优先。",
      "codex_scope": "适用于 Codex OAuth。Codex API Key 请在对应凭据的自定义请求头中设置 User-Agent。",
++    "gemini_scope": "仅将 Gemini CLI 的 User-Agent 填入草稿。",
++    "gemini_import_hint": "粘贴请求头或完整 HTTP 请求（最多 32 KiB）。只发送并保存 User-Agent。导入后可预览和选择样本。",
++    "gemini_invalid_import": "请粘贴含 Gemini CLI User-Agent 的请求头，最多 32 KiB。",
      "select": "选择 {{provider}} User-Agent",
-@@ -2693,5 +2693,180 @@
+@@ -2693,5 +2696,193 @@
      "reason_long_remaining": "长窗口剩余额度",
      "reason_id": "稳定标识排序",
      "reason_unknown": "其他原因"
@@ -523,6 +542,19 @@ diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
 +    "auto_scope": "自动更新仅替换最终 UA 中的客户端版本。SDK、Node、系统平台、agent-sdk 后缀、请求体和 TLS 仍使用各自的规则。",
 +    "scope_claude": "覆盖 Claude OAuth 与 API Key 请求，包括流式和上游 token 计数。固定的全局 UA 也会参与基线识别和生成的 billing 版本。",
 +    "scope_codex": "覆盖 Codex OAuth／文件凭据的 HTTP、流式、图像、compact 和 WebSocket 请求。Codex API Key 分组使用各自的凭据请求头。",
++    "scope_gemini": "适用于原生 Gemini API、Interactions、原生 Vertex AI 和可选的 Gemini CLI OAuth 推理请求。",
++    "gemini_ua_hint": "固定模式需填写完整的 User-Agent。留空则保留渠道默认值。凭据级 User-Agent 优先。",
++    "gemini_auto_scope": "自动模式使用 @google/gemini-cli 的稳定缓存版本，或内置回退版本 0.34.0。CPA 根据该版本、解析后的上游模型及 CPA 的运行平台生成 User-Agent。",
++    "gemini_channel_default": "渠道默认值",
++    "gemini_baseline_hint": "此基线根据已保存的设置生成，未选择凭据。自动模式下显示预览，上游模型按请求解析，平台取自 CPA。",
++    "gemini_updater_hint": "全局自动模式或符合条件的 API 密钥启用 auto 时，后台查询 npm 稳定版本。凭据文件中的覆盖使用缓存版本或内置版本。查询失败保留缓存，CPA 重启时清空缓存。",
++    "gemini_catalog_hint": "CPA 只记录已认证的 /v1、/v1beta 和 /backend-api/codex 请求中的 Gemini CLI User-Agent。保存草稿后样本才会生效。删除样本会保留已保存的设置。",
++    "gemini_runtime_unavailable": "Gemini 运行状态不可用。仍可编辑草稿。",
++    "gemini_search_samples": "搜索 User-Agent",
++    "priority_gemini_provider_hint": "固定模式使用配置的 User-Agent。自动模式根据缓存的 CLI 版本、上游模型和 CPA 运行平台生成。",
++    "priority_gemini_native_hint": "留空会保留渠道默认值。原生请求使用 Go 的 HTTP/1.1 或 HTTP/2 User-Agent。可选的 Gemini CLI 插件保留其现有的 User-Agent。",
++    "rule_gemini_origin_title": "推理请求范围",
++    "rule_gemini_origin": "Antigravity、Vertex OpenAI 兼容接口、AI Studio 转发以及 OAuth 等控制平面操作各自遵循独立的标识规则。",
 +    "field_packageVersion": "SDK 包版本",
 +    "field_runtimeVersion": "Node 运行时版本",
 +    "field_os": "操作系统",
@@ -628,7 +660,7 @@ diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
 +    "discard": "放弃更改",
 +    "discard_hint": "放弃未保存的身份配置，重新加载或离开此页面？",
 +    "saved": "配置已保存。热重载后的请求使用新配置；现有 WebSocket 握手头保持到重新连接。",
-+    "save_hint": "仅更新下方字段。保存前请同时检查两个服务商的更改；凭据覆盖仍优先，配置重载后生效。",
++    "save_hint": "保存前请检查下方字段。仅更新这些字段。凭据覆盖仍然优先，配置重载后生效。",
 +    "before": "已保存值",
 +    "after": "新值",
 +    "conflict": "配置已被其他操作修改。草稿已保留，请刷新并核对最新状态后重新应用更改。",
@@ -646,7 +678,7 @@ diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
 diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
 --- a/src/i18n/locales/zh-TW.json
 +++ b/src/i18n/locales/zh-TW.json
-@@ -2508,7 +2508,7 @@
+@@ -2508,7 +2508,10 @@
      "title": "{{provider}} 用戶端 UA 清單",
      "refresh": "重新整理",
      "import": "匯入請求標頭",
@@ -654,8 +686,11 @@ diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
 +    "description": "從連接到 CPA 且通過驗證的用戶端請求中採集。UA 由用戶端宣告，並非官方身分驗證。選取樣本可填入身分設定草稿。",
      "claude_scope": "適用於 Claude OAuth 與 API Key。憑證個別設定的 User-Agent 優先。",
      "codex_scope": "適用於 Codex OAuth。Codex API Key 請在對應憑證的自訂標頭設定 User-Agent。",
++    "gemini_scope": "只將 Gemini CLI 的 User-Agent 填入草稿。",
++    "gemini_import_hint": "貼上請求標頭或完整 HTTP 請求（最多 32 KiB）。只傳送及儲存 User-Agent。匯入後可預覽及選擇樣本。",
++    "gemini_invalid_import": "請貼上含 Gemini CLI User-Agent 的請求標頭，最多 32 KiB。",
      "select": "選擇 {{provider}} User-Agent",
-@@ -2721,5 +2721,180 @@
+@@ -2721,5 +2724,193 @@
      "reason_long_remaining": "長窗口剩餘額度",
      "reason_id": "穩定識別碼排序",
      "reason_unknown": "其他原因"
@@ -807,11 +842,24 @@ diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
 +    "sample_total": "{{count}} 個樣本 / 每個服務商上限 {{limit}} 個",
 +    "samples": "客戶端樣本庫",
 +    "save": "保存更改",
-+    "save_hint": "僅更新下方字段。保存前請同時檢查兩個服務商的更改；憑據覆蓋仍優先，配置重載後生效。",
++    "save_hint": "儲存前請檢查下方欄位。只更新這些欄位。憑證覆寫優先，重新載入設定後生效。",
 +    "saved": "配置已保存。熱重載後的請求使用新配置；現有 WebSocket 握手頭保持到重新連接。",
 +    "saved_state": "已保存狀態",
 +    "scope_claude": "覆蓋 Claude OAuth 與 API Key 請求，包括流式和上游 token 計數。固定的全局 UA 也會參與基線識別和生成的 billing 版本。",
 +    "scope_codex": "覆蓋 Codex OAuth／文件憑據的 HTTP、流式、圖像、compact 和 WebSocket 請求。Codex API Key 分組使用各自的憑據請求頭。",
++    "scope_gemini": "適用於原生 Gemini API、Interactions、原生 Vertex AI 與選用的 Gemini CLI OAuth 推論請求。",
++    "gemini_ua_hint": "固定模式請輸入完整的 User-Agent。留空會保留通道預設值。憑證層級的 User-Agent 優先。",
++    "gemini_auto_scope": "自動模式使用 @google/gemini-cli 的穩定快取版本，或內建備援版本 0.34.0。CPA 依該版本、解析後的上游模型與 CPA 的執行平台產生 User-Agent。",
++    "gemini_channel_default": "通道預設值",
++    "gemini_baseline_hint": "此基準依已儲存的設定產生，未選用憑證。自動模式顯示預覽，上游模型依請求解析，平台取自 CPA。",
++    "gemini_updater_hint": "全域自動模式或符合條件的 API 金鑰設為 auto 時，會在背景查詢 npm 穩定版本。憑證檔案的覆寫使用快取版本或內建版本。查詢失敗時保留快取，CPA 重新啟動時重設快取。",
++    "gemini_catalog_hint": "CPA 只記錄已驗證的 /v1、/v1beta 和 /backend-api/codex 請求中的 Gemini CLI User-Agent。儲存草稿後樣本才會生效。刪除樣本會保留已儲存的設定。",
++    "gemini_runtime_unavailable": "Gemini 執行狀態無法取得。仍可編輯草稿。",
++    "gemini_search_samples": "搜尋 User-Agent",
++    "priority_gemini_provider_hint": "固定模式使用設定的 User-Agent。自動模式依快取中的 CLI 版本、上游模型與 CPA 執行平台產生。",
++    "priority_gemini_native_hint": "留空會保留通道預設值。原生請求使用 Go 的 HTTP/1.1 或 HTTP/2 User-Agent。選用的 Gemini CLI 外掛會保留既有的 User-Agent。",
++    "rule_gemini_origin_title": "推論請求範圍",
++    "rule_gemini_origin": "Antigravity、Vertex OpenAI 相容介面、AI Studio 轉送及 OAuth 等控制平面作業各有獨立的識別規則。",
 +    "search_samples": "搜索 UA、SDK、Node 或平台",
 +    "settings": "身份配置",
 +    "source_all": "全部來源",
@@ -839,7 +887,7 @@ diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
 diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
 --- a/src/i18n/locales/ko.json
 +++ b/src/i18n/locales/ko.json
-@@ -2482,7 +2482,7 @@
+@@ -2482,7 +2482,10 @@
      "title": "{{provider}} 클라이언트 UA 목록",
      "refresh": "목록 새로 고침",
      "import": "요청 헤더 가져오기",
@@ -847,8 +895,11 @@ diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
 +    "description": "인증된 CPA 클라이언트 요청에서 수집합니다. UA는 클라이언트의 선언이며 진위 증명이 아닙니다. 샘플을 선택해 식별 정보 초안을 채우세요.",
      "claude_scope": "Claude OAuth와 API 키에 적용됩니다. 자격 증명별 User-Agent가 우선합니다.",
      "codex_scope": "Codex OAuth에 적용됩니다. Codex API 키는 해당 자격 증명의 사용자 지정 User-Agent 헤더를 사용합니다.",
++    "gemini_scope": "Gemini CLI User-Agent만 초안에 적용됩니다.",
++    "gemini_import_hint": "헤더 블록 또는 원시 HTTP 요청을 붙여넣으세요(최대 32 KiB). User-Agent만 전송하고 저장합니다. 가져온 샘플을 미리 보고 선택할 수 있습니다.",
++    "gemini_invalid_import": "Gemini CLI User-Agent가 포함된 헤더를 붙여넣으세요. 최대 32 KiB입니다.",
      "select": "{{provider}} User-Agent 선택",
-@@ -2695,5 +2695,180 @@
+@@ -2695,5 +2698,193 @@
      "outcome_counts": "성공 {{success}} · 실패 {{failed}} · 선택 오류 {{errors}}",
      "loss_counts": "대기열 초과 {{dropped}} · 파일 오류 {{io}} · 생성 오류 {{render}}",
      "recent_hint": "메모리의 최근 {{limit}}개 이벤트를 최신순으로 표시합니다. 필터는 표에만 적용되며 통계는 전체 세션 기준입니다. 과거 JSONL 파일은 읽지 않습니다. 파일 기록에 실패한 이벤트도 표시될 수 있습니다."
@@ -909,6 +960,19 @@ diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
 +    "auto_scope": "자동 업데이트는 최종 UA의 클라이언트 버전만 바꿉니다. SDK, Node, 플랫폼, agent-sdk 접미사, 본문과 TLS는 별도 규칙을 따릅니다.",
 +    "scope_claude": "Claude OAuth 및 API Key의 스트리밍과 업스트림 토큰 계산을 포함합니다. 고정 전역 UA는 기준 식별 및 생성되는 billing 버전에도 영향을 줍니다.",
 +    "scope_codex": "Codex OAuth/파일 인증 정보의 HTTP, 스트리밍, 이미지, compact, WebSocket을 포함합니다. Codex API Key 그룹은 자체 헤더를 사용합니다.",
++    "scope_gemini": "네이티브 Gemini API, Interactions, 네이티브 Vertex AI 및 선택적 Gemini CLI OAuth 추론에 적용됩니다.",
++    "gemini_ua_hint": "고정 모드는 전체 User-Agent를 입력하세요. 비워 두면 채널 기본값을 유지합니다. 자격 증명의 User-Agent가 우선합니다.",
++    "gemini_auto_scope": "자동 모드는 캐시된 안정판 @google/gemini-cli 또는 기본 제공 대체 버전 0.34.0을 사용합니다. CPA는 이 버전, 확정된 업스트림 모델, CPA가 실행되는 플랫폼으로 User-Agent를 생성합니다.",
++    "gemini_channel_default": "채널 기본값",
++    "gemini_baseline_hint": "이 기준은 자격 증명을 선택하지 않은 상태에서 저장된 설정을 사용합니다. 자동 모드는 미리 보기입니다. 업스트림 모델은 요청마다 확정되며 플랫폼은 CPA의 실행 환경을 따릅니다.",
++    "gemini_updater_hint": "전역 auto 설정 또는 적격 API 키의 auto 설정은 npm 안정판 조회를 시작합니다. 자격 증명 파일의 재정의는 캐시된 버전이나 기본 제공 버전을 사용합니다. 조회 실패 시 캐시를 유지하고 CPA 재시작 시 초기화합니다.",
++    "gemini_catalog_hint": "인증된 /v1, /v1beta 및 /backend-api/codex 요청에서 Gemini CLI User-Agent만 기록합니다. 샘플을 적용하려면 초안을 저장하세요. 샘플을 삭제해도 저장된 설정은 유지됩니다.",
++    "gemini_runtime_unavailable": "Gemini 런타임 상태를 확인할 수 없습니다. 초안은 편집할 수 있습니다.",
++    "gemini_search_samples": "User-Agent 검색",
++    "priority_gemini_provider_hint": "고정 모드는 설정된 User-Agent를 사용합니다. 자동 모드는 캐시된 CLI 버전, 업스트림 모델, CPA 플랫폼으로 생성합니다.",
++    "priority_gemini_native_hint": "비워 두면 채널 기본값을 유지합니다. 네이티브 요청은 Go의 HTTP/1.1 또는 HTTP/2 User-Agent를 사용합니다. 선택적 Gemini CLI 플러그인은 기존 User-Agent를 유지합니다.",
++    "rule_gemini_origin_title": "추론 적용 범위",
++    "rule_gemini_origin": "Antigravity, Vertex의 OpenAI 호환 경로, AI Studio 릴레이 및 OAuth 같은 제어 영역 작업은 각각 별도의 식별 규칙을 사용합니다.",
 +    "field_packageVersion": "SDK 패키지 버전",
 +    "field_runtimeVersion": "Node 런타임 버전",
 +    "field_os": "운영체제",
@@ -1014,7 +1078,7 @@ diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
 +    "discard": "변경 버리기",
 +    "discard_hint": "저장하지 않은 식별 설정을 버리고 새로고침하거나 페이지를 떠날까요?",
 +    "saved": "저장했습니다. 설정 재로드 후 요청에 새 값이 적용되며 기존 WebSocket 헤더는 재연결까지 유지됩니다.",
-+    "save_hint": "아래 필드만 수정합니다. 두 공급자의 변경을 검토하세요. 인증 정보 재정의가 우선하며 설정 재로드 후 적용됩니다.",
++    "save_hint": "저장 전에 아래 필드를 검토하세요. 해당 필드만 수정합니다. 자격 증명의 재정의가 우선하며 설정을 다시 불러온 뒤 적용됩니다.",
 +    "before": "저장된 값",
 +    "after": "새 값",
 +    "conflict": "다른 곳에서 설정이 변경되었습니다. 초안은 유지됩니다. 새로고침하여 최신 상태를 확인하고 다시 적용하세요.",
@@ -1032,7 +1096,7 @@ diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
 diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
 --- a/src/i18n/locales/ru.json
 +++ b/src/i18n/locales/ru.json
-@@ -2476,7 +2476,7 @@
+@@ -2476,7 +2476,10 @@
      "title": "UA клиентов {{provider}}",
      "refresh": "Обновить список",
      "import": "Импорт заголовков",
@@ -1040,8 +1104,11 @@ diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
 +    "description": "Собрано из авторизованных запросов клиентов CPA. UA заявлен клиентом, а не подтверждён. Выберите образец для заполнения черновика.",
      "claude_scope": "Для Claude OAuth и API-ключей. User-Agent отдельной учётной записи имеет приоритет.",
      "codex_scope": "Для Codex OAuth. Для API-ключей Codex задайте User-Agent в заголовках учётной записи.",
++    "gemini_scope": "В черновик подставляется только User-Agent Gemini CLI.",
++    "gemini_import_hint": "Вставьте блок заголовков или полный HTTP-запрос (до 32 КиБ). Отправляется и сохраняется только User-Agent. Импортированный образец можно просмотреть и выбрать.",
++    "gemini_invalid_import": "Вставьте заголовки с User-Agent Gemini CLI, до 32 КиБ.",
      "select": "Выбрать User-Agent {{provider}}",
-@@ -2689,5 +2689,180 @@
+@@ -2689,5 +2692,193 @@
      "outcome_counts": "Успех {{success}} · Ошибка {{failed}} · Ошибки выбора {{errors}}",
      "loss_counts": "Очередь полна {{dropped}} · Ошибки файла {{io}} · Ошибки формирования {{render}}",
      "recent_hint": "Последние {{limit}} событий в памяти, новые сверху. Фильтры влияют только на таблицу; итоги охватывают весь сеанс. История JSONL не загружается. Событие может отображаться даже при ошибке записи файла."
@@ -1102,6 +1169,19 @@ diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
 +    "auto_scope": "Автообновление меняет только версию клиента в итоговом UA. SDK, Node, платформа, суффикс agent-sdk, тело и TLS следуют отдельным правилам.",
 +    "scope_claude": "Для Claude OAuth и API Key, включая потоковые запросы и подсчёт токенов на сервере. Фиксированный глобальный UA также влияет на базовое распознавание и создаваемую версию billing.",
 +    "scope_codex": "Для Codex OAuth/файловых учётных данных: HTTP, поток, изображения, compact и WebSocket. Группы Codex API Key используют собственные заголовки.",
++    "scope_gemini": "Применяется к нативным Gemini API, Interactions и Vertex AI, а также к запросам вывода Gemini CLI через OAuth при включённом плагине.",
++    "gemini_ua_hint": "Для фиксированного режима введите полный User-Agent. Пустое поле оставляет значение по умолчанию для канала. User-Agent учётных данных имеет приоритет.",
++    "gemini_auto_scope": "Автоматический режим использует кэшированный стабильный выпуск @google/gemini-cli или встроенную резервную версию 0.34.0. CPA формирует User-Agent из этой версии, выбранной модели вышестоящего сервиса и платформы, на которой запущен CPA.",
++    "gemini_channel_default": "По умолчанию для канала",
++    "gemini_baseline_hint": "Это базовое значение сохранённых настроек без выбранных учётных данных. В автоматическом режиме показан пример. Модель определяется для каждого запроса, а платформа соответствует среде выполнения CPA.",
++    "gemini_updater_hint": "Глобальный параметр auto или auto для подходящего ключа API запускает поиск стабильных версий в npm. Переопределения из файлов учётных данных используют кэшированную или встроенную версию. При неудачном поиске кэш сохраняется, а после перезапуска CPA сбрасывается.",
++    "gemini_catalog_hint": "Из аутентифицированных запросов /v1, /v1beta и /backend-api/codex записывается только User-Agent Gemini CLI. Сохраните черновик, чтобы применить образец. Удаление образца сохраняет действующие настройки.",
++    "gemini_runtime_unavailable": "Состояние Gemini недоступно. Черновик по-прежнему можно редактировать.",
++    "gemini_search_samples": "Поиск по User-Agent",
++    "priority_gemini_provider_hint": "Фиксированный режим использует заданный User-Agent. Автоматический режим формирует его из версии CLI в кэше, модели вышестоящего сервиса и платформы CPA.",
++    "priority_gemini_native_hint": "Пустое значение оставляет настройку канала по умолчанию. Нативные запросы используют User-Agent Go для HTTP/1.1 или HTTP/2. Дополнительный плагин Gemini CLI сохраняет свой User-Agent.",
++    "rule_gemini_origin_title": "Область применения",
++    "rule_gemini_origin": "Antigravity, совместимый с OpenAI интерфейс Vertex, прокси AI Studio, OAuth и другие управляющие операции используют собственные правила идентификации.",
 +    "field_packageVersion": "Версия пакета SDK",
 +    "field_runtimeVersion": "Версия Node",
 +    "field_os": "Операционная система",
@@ -1207,7 +1287,7 @@ diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
 +    "discard": "Отменить изменения",
 +    "discard_hint": "Отменить несохранённые настройки и обновить или покинуть страницу?",
 +    "saved": "Сохранено. Новые запросы используют настройки после перезагрузки конфигурации; заголовки текущих WebSocket сохраняются до переподключения.",
-+    "save_hint": "Обновляются только поля ниже. Проверьте обоих провайдеров. Переопределения учётных данных приоритетнее; применение после перезагрузки конфигурации.",
++    "save_hint": "Проверьте поля ниже перед сохранением. Обновляются только эти поля. Переопределения учётных данных имеют приоритет. Изменения действуют после перезагрузки конфигурации.",
 +    "before": "Сохранённое значение",
 +    "after": "Новое значение",
 +    "conflict": "Конфигурация изменена в другом месте. Черновик сохранён. Обновите, проверьте новое состояние и повторите изменения.",
@@ -1225,7 +1305,7 @@ diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
 diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
 --- a/src/i18n/locales/tr.json
 +++ b/src/i18n/locales/tr.json
-@@ -2482,7 +2482,7 @@
+@@ -2482,7 +2482,10 @@
      "title": "{{provider}} istemci UA listesi",
      "refresh": "Listeyi yenile",
      "import": "İstek başlıklarını içe aktar",
@@ -1233,8 +1313,11 @@ diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
 +    "description": "CPA için doğrulanmış istemci isteklerinden toplanır. UA istemci beyanıdır, özgünlük kanıtı değildir. Kimlik taslağını doldurmak için örnek seçin.",
      "claude_scope": "Claude OAuth ve API anahtarlarına uygulanır. Kimlik bilgisine özel User-Agent önceliklidir.",
      "codex_scope": "Codex OAuth için geçerlidir. Codex API anahtarlarında ilgili kimlik bilgisinin özel User-Agent başlığını ayarlayın.",
++    "gemini_scope": "Taslağa yalnızca Gemini CLI User-Agent değeri uygulanır.",
++    "gemini_import_hint": "Bir başlık bloğu veya ham HTTP isteği yapıştırın (en fazla 32 KiB). Yalnızca User-Agent gönderilir ve saklanır. İçe aktarılan örneği önizleyip seçebilirsiniz.",
++    "gemini_invalid_import": "Gemini CLI User-Agent içeren başlıklar yapıştırın. Üst sınır 32 KiB’dir.",
      "select": "{{provider}} User-Agent seç",
-@@ -2695,5 +2695,180 @@
+@@ -2695,5 +2698,193 @@
      "outcome_counts": "Başarılı {{success}} · Başarısız {{failed}} · Seçim hataları {{errors}}",
      "loss_counts": "Kuyruk dolu {{dropped}} · Dosya hataları {{io}} · Oluşturma hataları {{render}}",
      "recent_hint": "Bellekteki son {{limit}} olay, en yeni önce gösterilir. Filtreler yalnızca tabloyu etkiler; toplamlar tüm oturuma aittir. Geçmiş JSONL dosyaları okunmaz. Dosyaya yazılamayan olaylar da burada görünebilir."
@@ -1295,6 +1378,19 @@ diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
 +    "auto_scope": "Otomatik mod yalnızca son UA'daki istemci sürümünü değiştirir. SDK, Node, platform, agent-sdk eki, gövde ve TLS ayrı kurallara bağlıdır.",
 +    "scope_claude": "Akış ve üst sunucu token sayımı dahil Claude OAuth ve API Key isteklerini kapsar. Sabit genel UA taban tanımayı ve üretilen billing sürümünü de etkiler.",
 +    "scope_codex": "Codex OAuth/dosya kimlik bilgilerinde HTTP, akış, görüntü, compact ve WebSocket isteklerini kapsar. Codex API Key grupları kendi başlıklarını kullanır.",
++    "scope_gemini": "Yerel Gemini API, Interactions, yerel Vertex AI ve isteğe bağlı Gemini CLI OAuth çıkarım istekleri için geçerlidir.",
++    "gemini_ua_hint": "Sabit mod için User-Agent değerini eksiksiz girin. Boş bırakırsanız kanal varsayılanı korunur. Kimlik bilgisinin User-Agent değeri önceliklidir.",
++    "gemini_auto_scope": "Otomatik mod, önbellekteki kararlı @google/gemini-cli sürümünü veya yerleşik yedek sürüm 0.34.0’ı kullanır. CPA bu sürüm, çözümlenen üst akış modeli ve CPA’nın çalıştığı platformla User-Agent oluşturur.",
++    "gemini_channel_default": "Kanal varsayılanı",
++    "gemini_baseline_hint": "Bu temel değer, kimlik bilgisi seçilmeden kayıtlı ayarlardan alınır. Otomatik modda önizleme gösterilir. Üst akış modeli her istek için çözümlenir ve platform CPA’dan alınır.",
++    "gemini_updater_hint": "Genel auto ayarı veya uygun bir API anahtarındaki auto ayarı npm kararlı sürüm sorgularını başlatır. Dosya tabanlı kimlik bilgisi geçersiz kılmaları önbellekteki veya yerleşik sürümü kullanır. Sorgu başarısız olursa önbellek korunur ve CPA yeniden başlatıldığında sıfırlanır.",
++    "gemini_catalog_hint": "CPA, kimliği doğrulanmış /v1, /v1beta ve /backend-api/codex isteklerinden yalnızca Gemini CLI User-Agent değerini kaydeder. Örneği uygulamak için taslağı kaydedin. Örneğin silinmesi kayıtlı ayarları değiştirmez.",
++    "gemini_runtime_unavailable": "Gemini çalışma durumu kullanılamıyor. Taslağı düzenlemeye devam edebilirsiniz.",
++    "gemini_search_samples": "User-Agent ara",
++    "priority_gemini_provider_hint": "Sabit mod, yapılandırılan User-Agent değerini kullanır. Otomatik mod, önbellekteki CLI sürümü, üst akış modeli ve CPA platformunu kullanır.",
++    "priority_gemini_native_hint": "Boş değer kanalın varsayılanını korur. Yerel istekler Go’nun HTTP/1.1 veya HTTP/2 User-Agent değerini kullanır. İsteğe bağlı Gemini CLI eklentisi mevcut User-Agent değerini korur.",
++    "rule_gemini_origin_title": "Çıkarım kapsamı",
++    "rule_gemini_origin": "Antigravity, Vertex OpenAI uyumluluğu, AI Studio aktarıcısı ve OAuth gibi kontrol düzlemi işlemleri kendi kimlik kurallarını kullanır.",
 +    "field_packageVersion": "SDK paket sürümü",
 +    "field_runtimeVersion": "Node sürümü",
 +    "field_os": "İşletim sistemi",
@@ -1400,7 +1496,7 @@ diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
 +    "discard": "Değişiklikleri at",
 +    "discard_hint": "Kaydedilmeyen kimlik ayarları atılıp sayfa yenilensin veya sayfadan çıkılsın mı?",
 +    "saved": "Ayarlar kaydedildi. Yapılandırma yeniden yüklendikten sonraki istekler yeni ayarları kullanır; mevcut WebSocket başlıkları yeniden bağlantıya kadar korunur.",
-+    "save_hint": "Yalnızca aşağıdaki alanlar güncellenir. İki sağlayıcıyı da inceleyin. Kimlik bilgisi geçersiz kılmaları önceliklidir; yapılandırma yeniden yüklenince uygulanır.",
++    "save_hint": "Kaydetmeden önce aşağıdaki alanları inceleyin. Yalnızca bu alanlar güncellenir. Kimlik bilgisine özel değerler önceliklidir. Değişiklikler yapılandırma yeniden yüklenince uygulanır.",
 +    "before": "Kayıtlı değer",
 +    "after": "Yeni değer",
 +    "conflict": "Yapılandırma başka yerde değişti. Taslağınız korundu. Yenileyin, son durumu inceleyip değişiklikleri tekrar uygulayın.",
@@ -1418,7 +1514,7 @@ diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
 diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
 --- a/src/i18n/locales/vi.json
 +++ b/src/i18n/locales/vi.json
-@@ -2488,7 +2488,7 @@
+@@ -2488,7 +2488,10 @@
      "title": "Danh sách UA {{provider}}",
      "refresh": "Làm mới",
      "import": "Nhập header yêu cầu",
@@ -1426,8 +1522,11 @@ diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
 +    "description": "Thu thập từ yêu cầu đã xác thực tới CPA. UA do ứng dụng khai báo, không phải chứng minh xác thực. Chọn mẫu để điền bản nháp.",
      "claude_scope": "Áp dụng cho Claude OAuth và khóa API. User-Agent riêng của thông tin xác thực được ưu tiên.",
      "codex_scope": "Áp dụng cho Codex OAuth. Với khóa API Codex, đặt User-Agent trong header tùy chỉnh của khóa.",
++    "gemini_scope": "Chỉ User-Agent của Gemini CLI được áp dụng vào bản nháp.",
++    "gemini_import_hint": "Dán một khối header hoặc yêu cầu HTTP đầy đủ (tối đa 32 KiB). Chỉ User-Agent được gửi và lưu. Sau khi nhập, bạn có thể xem trước và chọn mẫu.",
++    "gemini_invalid_import": "Dán header chứa User-Agent của Gemini CLI, tối đa 32 KiB.",
      "select": "Chọn User-Agent {{provider}}",
-@@ -2701,5 +2701,180 @@
+@@ -2701,5 +2704,193 @@
      "outcome_counts": "Thành công {{success}} · Thất bại {{failed}} · Lỗi lựa chọn {{errors}}",
      "loss_counts": "Hàng đợi đầy {{dropped}} · Lỗi tệp {{io}} · Lỗi tạo bản ghi {{render}}",
      "recent_hint": "{{limit}} sự kiện gần nhất trong bộ nhớ, mới nhất trước. Bộ lọc chỉ áp dụng cho bảng; tổng số tính cả phiên. Không tải lịch sử JSONL. Sự kiện có thể xuất hiện dù ghi tệp thất bại."
@@ -1488,6 +1587,19 @@ diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
 +    "auto_scope": "Tự động chỉ đổi phiên bản ứng dụng trong UA cuối cùng. SDK, Node, nền tảng, hậu tố agent-sdk, nội dung và TLS dùng quy tắc riêng.",
 +    "scope_claude": "Áp dụng cho Claude OAuth và API Key, gồm truyền luồng và đếm token phía trên. UA toàn cục cố định cũng ảnh hưởng nhận dạng cơ sở và phiên bản billing được tạo.",
 +    "scope_codex": "Áp dụng cho Codex OAuth/tệp xác thực: HTTP, truyền luồng, ảnh, compact và WebSocket. Nhóm API Key Codex dùng header riêng.",
++    "scope_gemini": "Áp dụng cho các yêu cầu suy luận qua Gemini API nguyên bản, Interactions, Vertex AI nguyên bản và Gemini CLI OAuth tùy chọn.",
++    "gemini_ua_hint": "Nhập User-Agent đầy đủ cho chế độ cố định. Để trống để giữ mặc định của kênh. User-Agent trong thông tin xác thực được ưu tiên.",
++    "gemini_auto_scope": "Chế độ tự động dùng bản ổn định @google/gemini-cli trong bộ nhớ đệm hoặc bản dự phòng tích hợp 0.34.0. CPA tạo User-Agent từ phiên bản đó, mô hình thượng nguồn đã phân giải và nền tảng chạy CPA.",
++    "gemini_channel_default": "Mặc định của kênh",
++    "gemini_baseline_hint": "Giá trị cơ sở này dựa trên cài đặt đã lưu khi chưa chọn thông tin xác thực. Chế độ tự động hiển thị bản xem trước. Mô hình thượng nguồn được phân giải theo từng yêu cầu, còn nền tảng lấy từ CPA.",
++    "gemini_updater_hint": "Chế độ auto toàn cục hoặc auto trên khóa API đủ điều kiện sẽ bắt đầu tra cứu bản ổn định trên npm. Giá trị ghi đè trong tệp thông tin xác thực dùng phiên bản trong bộ nhớ đệm hoặc phiên bản tích hợp. Tra cứu thất bại vẫn giữ bộ nhớ đệm và CPA đặt lại nó khi khởi động lại.",
++    "gemini_catalog_hint": "CPA chỉ ghi lại User-Agent của Gemini CLI từ các yêu cầu /v1, /v1beta và /backend-api/codex đã xác thực. Lưu bản nháp để áp dụng mẫu. Xóa mẫu vẫn giữ cài đặt đã lưu.",
++    "gemini_runtime_unavailable": "Không có trạng thái Gemini lúc chạy. Bạn vẫn có thể chỉnh sửa bản nháp.",
++    "gemini_search_samples": "Tìm theo User-Agent",
++    "priority_gemini_provider_hint": "Chế độ cố định dùng User-Agent đã cấu hình. Chế độ tự động tạo User-Agent từ phiên bản CLI trong bộ nhớ đệm, mô hình thượng nguồn và nền tảng CPA.",
++    "priority_gemini_native_hint": "Giá trị trống giữ mặc định của kênh. Yêu cầu nguyên bản sử dụng User-Agent của Go cho HTTP/1.1 hoặc HTTP/2. Plugin Gemini CLI tùy chọn giữ User-Agent hiện có.",
++    "rule_gemini_origin_title": "Phạm vi suy luận",
++    "rule_gemini_origin": "Antigravity, giao diện tương thích OpenAI của Vertex, chuyển tiếp AI Studio và các hoạt động điều khiển như OAuth dùng quy tắc nhận dạng riêng.",
 +    "field_packageVersion": "Phiên bản gói SDK",
 +    "field_runtimeVersion": "Phiên bản Node",
 +    "field_os": "Hệ điều hành",
@@ -1593,7 +1705,7 @@ diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
 +    "discard": "Bỏ thay đổi",
 +    "discard_hint": "Bỏ cấu hình danh tính chưa lưu để tải lại hoặc rời trang?",
 +    "saved": "Đã lưu. Yêu cầu sau tải lại cấu hình dùng cài đặt mới; WebSocket hiện tại giữ header đến khi kết nối lại.",
-+    "save_hint": "Chỉ cập nhật các trường dưới đây. Xem lại cả hai nhà cung cấp. Ghi đè theo thông tin xác thực vẫn ưu tiên; có hiệu lực sau tải lại cấu hình.",
++    "save_hint": "Xem lại các trường bên dưới trước khi lưu. Chỉ những trường này được cập nhật. Giá trị ghi đè theo thông tin xác thực được ưu tiên. Thay đổi có hiệu lực sau khi tải lại cấu hình.",
 +    "before": "Giá trị đã lưu",
 +    "after": "Giá trị mới",
 +    "conflict": "Cấu hình đã đổi ở nơi khác. Bản nháp được giữ. Làm mới, kiểm tra trạng thái mới và áp dụng lại.",

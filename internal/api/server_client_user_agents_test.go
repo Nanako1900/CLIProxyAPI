@@ -19,6 +19,7 @@ func TestClientUserAgentCaptureAfterAuthentication(t *testing.T) {
 		}
 	})
 	for _, route := range []struct{ method, path, ua, provider string }{
+		{http.MethodGet, "/v1beta/models", "GeminiCLI/0.41.0/gemini-2.5-pro (linux; arm64)", "gemini"},
 		{http.MethodGet, "/v1/models", "claude-cli/2.1.319", "claude"},
 		{http.MethodPost, "/v1/responses", "codex-tui/0.114.0", "codex"},
 		{http.MethodGet, "/backend-api/codex/responses", "codex_cli_rs/0.115.0", "codex"},
@@ -97,6 +98,13 @@ func TestClientUserAgentManagementContract(t *testing.T) {
 		request(http.MethodGet, endpoint, "", "test-management-key", http.StatusOK)
 	}
 	key := "test-management-key"
+	const gemini = "/v8/management/client-user-agents?provider=gemini"
+	request(http.MethodPost, gemini, `{"headers":"User-Agent: codex/1.2.3"}`, key, http.StatusUnprocessableEntity)
+	request(http.MethodPost, gemini, `{"headers":"User-Agent: GeminiCLI/1.2.3/gemini-pro (linux; arm64)\nX-Goog-Api-Client: private"}`, key, http.StatusOK)
+	result := request(http.MethodGet, gemini, "", key, http.StatusOK)
+	if ojson.Get(result, "items.0.version").String() != "1.2.3" || strings.Contains(result, "private") {
+		t.Fatalf("unexpected Gemini list: %s", result)
+	}
 	request(http.MethodGet, "/v8/management/client-user-agents?provider=unknown", "", key, http.StatusBadRequest)
 	request(http.MethodPost, endpoint, `{"headers":"User-Agent: codex/1.2.3"}`, key, http.StatusUnprocessableEntity)
 	request(http.MethodPost, endpoint, `{"headers":"User-Agent: claude-cli/1.2.3\nUser-Agent: claude-cli/2.0.0"}`, key, http.StatusUnprocessableEntity)

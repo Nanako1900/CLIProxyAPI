@@ -68,14 +68,17 @@ cannot be changed through these endpoints.
 
 ### Native User-Agent settings
 
-The management panel exposes both User-Agent defaults in the dedicated **UA control
-panel**. The old Advanced header section links to it. To enable stable version tracking without
-plugins, send `PATCH /v8/management/config`:
+The **UA control panel** exposes Claude Code, Codex and Gemini settings. To enable
+stable version tracking for any of these providers, patch its field with
+`PATCH /v8/management/config` as in this example.
 
 ```json
 {
   "oauth": {"providers": {"codex": {"header-defaults": {"user-agent": "auto"}}}},
-  "upstream": {"claude": {"header-defaults": {"user-agent": "auto"}}}
+  "upstream": {
+    "claude": {"header-defaults": {"user-agent": "auto"}},
+    "gemini": {"header-defaults": {"user-agent": "auto"}}
+  }
 }
 ```
 
@@ -83,7 +86,10 @@ Explicit strings override native/model User-Agent rules. A Claude Code UA keeps
 per-request comment fields from the client (for example `workload/cron`) that the
 explicit string does not name. Credential-specific
 `headers.User-Agent` takes precedence and also accepts `auto`. The Codex OAuth
-default does not apply to API-key groups. Values containing control characters,
+default does not apply to API-key groups. The Gemini setting covers native Gemini,
+Interactions, native Vertex and Gemini CLI OAuth inference. An empty Gemini UA
+uses the selected channel's default. Auto resolves the model and platform per request.
+Values containing control characters,
 non-ASCII bytes, or more than 1024 bytes are rejected before saving. See
 [User-Agent settings](user-agent-settings.md) for refresh behavior and deployment.
 
@@ -107,7 +113,7 @@ unavailable in Home mode. They do not change active configuration:
 
 | Method and path | Behavior |
 | --- | --- |
-| `GET /client-user-agents?provider=claude` | Returns `{ "items": [...], "limit": 100 }`; use `codex` for Codex. |
+| `GET /client-user-agents?provider=claude` | Returns `{ "items": [...], "limit": 100 }` for the selected provider (`claude`, `codex` or `gemini`). |
 | `POST /client-user-agents?provider=claude` | Imports `{ "headers": "User-Agent: claude-cli/2.1.319\n..." }` and returns the sample. |
 | `DELETE /client-user-agents/:id?provider=claude` | Deletes a sample; returns 204. |
 

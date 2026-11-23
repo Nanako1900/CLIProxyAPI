@@ -1,6 +1,7 @@
 package helps
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -30,7 +31,7 @@ func TestClientUserAgentStatusesReflectConfiguredBaselineWithoutChangingIt(t *te
 		UserAgent: "auto", PackageVersion: "0.123.0", RuntimeVersion: "v26.5.0", OS: "Linux", Arch: "x64", Timeout: "300",
 	}}
 	statuses := ClientUserAgentStatuses(cfg)
-	if len(statuses) != 2 || statuses[0].Provider != "claude" || statuses[1].Provider != "codex" {
+	if len(statuses) != 3 || statuses[0].Provider != "claude" || statuses[1].Provider != "codex" {
 		t.Fatalf("unexpected providers: %+v", statuses)
 	}
 	claude := statuses[0]
@@ -47,5 +48,29 @@ func TestClientUserAgentStatusesReflectConfiguredBaselineWithoutChangingIt(t *te
 	cfg.Home.Enabled = true
 	if ClientUserAgentStatuses(cfg)[0].Auto.Enabled {
 		t.Fatal("Home mode incorrectly reports automatic queries enabled")
+	}
+}
+
+func TestGeminiUserAgentStatus(t *testing.T) {
+	for _, value := range []string{"", "my-tool/1", "auto"} {
+		cfg, err := config.ParseConfigBytes([]byte("upstream: {gemini: {header-defaults: {user-agent: '" + value + "'}}}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		statuses := ClientUserAgentStatuses(cfg)
+		if len(statuses) != 3 || statuses[2].Provider != "gemini" {
+			t.Fatal("missing Gemini status")
+		}
+		gemini := statuses[2]
+		if gemini.DefaultUserAgent != "" || len(gemini.BaselineHeaders) != 0 {
+			t.Fatal("Gemini baseline varies by executor")
+		}
+		if value == "auto" {
+			if !gemini.Auto.Enabled || gemini.Mode != "auto" || !strings.Contains(gemini.ResolvedUserAgent, "/<model> (") || gemini.Auto.RegistryURL != "https://registry.npmjs.org/@google/gemini-cli/latest" {
+				t.Fatalf("unexpected Gemini preview: %+v", gemini)
+			}
+		} else if gemini.ResolvedUserAgent != value || gemini.Auto.Enabled {
+			t.Fatalf("unexpected resolved UA %q", gemini.ResolvedUserAgent)
+		}
 	}
 }

@@ -81,6 +81,7 @@ func NewStore(path string) (*Store, error) {
 	}
 	s.trimLocked("claude")
 	s.trimLocked("codex")
+	s.trimLocked("gemini")
 	return s, nil
 }
 
