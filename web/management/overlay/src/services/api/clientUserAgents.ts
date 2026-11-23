@@ -1,6 +1,6 @@
 import { apiClient } from './client';
 
-export type ClientProvider = 'claude' | 'codex';
+export type ClientProvider = 'claude' | 'codex' | 'gemini';
 export type ClientUserAgent = {
   id: string;
   provider: ClientProvider;

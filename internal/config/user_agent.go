@@ -25,6 +25,7 @@ func (cfg *Config) ValidateUserAgents() error {
 	}
 	for path, value := range map[string]string{
 		"oauth.providers.codex.header-defaults.user-agent": cfg.CodexHeaderDefaults.UserAgent,
+		"upstream.gemini.header-defaults.user-agent":       cfg.GeminiHeaderDefaults.UserAgent,
 		"upstream.claude.header-defaults.user-agent":       cfg.ClaudeHeaderDefaults.UserAgent,
 	} {
 		if !ValidUserAgent(value) {
@@ -32,12 +33,22 @@ func (cfg *Config) ValidateUserAgents() error {
 		}
 	}
 	validateHeaders := func(provider string, index int, headers map[string]string) error {
-		for name, value := range headers {
-			if strings.EqualFold(strings.TrimSpace(name), "User-Agent") && !ValidUserAgent(value) {
-				return fmt.Errorf("%s credential %d User-Agent must contain at most 1024 printable ASCII characters", provider, index+1)
-			}
+		if err := validateUserAgentHeaders(headers, usesGeminiUserAgent(provider)); err != nil {
+			return fmt.Errorf("%s credential %d: %w", provider, index+1, err)
 		}
 		return nil
+	}
+	for provider, keys := range map[string][]GeminiKey{"gemini": cfg.GeminiKey, "interactions": cfg.InteractionsKey} {
+		for i, key := range keys {
+			if errValidate := validateHeaders(provider, i, key.Headers); errValidate != nil {
+				return errValidate
+			}
+		}
+	}
+	for i, key := range cfg.VertexCompatAPIKey {
+		if errValidate := validateHeaders("vertex", i, key.Headers); errValidate != nil {
+			return errValidate
+		}
 	}
 	for i, key := range cfg.CodexKey {
 		if errValidate := validateHeaders("codex", i, key.Headers); errValidate != nil {
@@ -47,6 +58,34 @@ func (cfg *Config) ValidateUserAgents() error {
 	for i, key := range cfg.ClaudeKey {
 		if errValidate := validateHeaders("claude", i, key.Headers); errValidate != nil {
 			return errValidate
+		}
+	}
+	return nil
+}
+
+func usesGeminiUserAgent(provider string) bool {
+	return provider == "gemini" || provider == "interactions" || provider == "vertex"
+}
+
+func validateUserAgentHeaders(headers map[string]string, rejectConflicts bool) error {
+	var previous string
+	var seen bool
+	for name, value := range headers {
+		if !strings.EqualFold(strings.TrimSpace(name), "User-Agent") {
+			continue
+		}
+		if !ValidUserAgent(value) {
+			return fmt.Errorf("User-Agent must contain at most 1024 printable ASCII characters")
+		}
+		if rejectConflicts {
+			normalized := strings.TrimSpace(value)
+			if strings.EqualFold(normalized, "auto") {
+				normalized = "auto"
+			}
+			if seen && previous != normalized {
+				return fmt.Errorf("conflicting User-Agent headers")
+			}
+			previous, seen = normalized, true
 		}
 	}
 	return nil

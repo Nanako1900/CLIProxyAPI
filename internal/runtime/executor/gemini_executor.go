@@ -92,7 +92,7 @@ func (e *GeminiExecutor) PrepareRequest(req *http.Request, auth *cliproxyauth.Au
 		req.Header.Del("x-goog-api-key")
 		req.Header.Del("Authorization")
 	}
-	applyGeminiHeaders(req, auth)
+	helps.ApplyGeminiHeaders(req, e.cfg, auth, "", nil)
 	return nil
 }
 
@@ -209,7 +209,7 @@ func (e *GeminiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	if apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", apiKey)
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, baseModel, opts.Headers)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -375,7 +375,7 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 	if apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", apiKey)
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, baseModel, opts.Headers)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -762,7 +762,7 @@ func (e *GeminiExecutor) executeInteractions(ctx context.Context, auth *cliproxy
 	if apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", apiKey)
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, doc.Get("model").String(), opts.Headers)
 	applyGeminiInteractionsRequestHeaders(httpReq, opts.Headers)
 	applyGeminiInteractionsRevisionHeader(httpReq)
 
@@ -854,7 +854,7 @@ func (e *GeminiExecutor) executeInteractionsStream(ctx context.Context, auth *cl
 	if apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", apiKey)
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, doc.Get("model").String(), opts.Headers)
 	applyGeminiInteractionsRequestHeaders(httpReq, opts.Headers)
 	applyGeminiInteractionsRevisionHeader(httpReq)
 
@@ -1052,7 +1052,7 @@ func (e *GeminiExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	if apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", apiKey)
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, baseModel, opts.Headers)
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
 		authID = auth.ID
@@ -1274,14 +1274,6 @@ func geminiAuthLogFields(auth *cliproxyauth.Auth) (string, string, string, strin
 	}
 	authType, authValue := auth.AccountInfo()
 	return auth.ID, auth.Label, authType, authValue
-}
-
-func applyGeminiHeaders(req *http.Request, auth *cliproxyauth.Auth, clientHeaders ...http.Header) {
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(req, attrs, clientHeaders...)
 }
 
 func capGeminiMaxOutputTokens(body []byte, modelName string) []byte {

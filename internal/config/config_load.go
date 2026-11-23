@@ -295,6 +295,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	}
 
 	// Sanitize Gemini API key configuration and migrate legacy entries.
+	cfg.GeminiHeaderDefaults.UserAgent = strings.TrimSpace(cfg.GeminiHeaderDefaults.UserAgent)
 	cfg.SanitizeGeminiKeys()
 
 	// Sanitize native Interactions API key configuration.

@@ -10,13 +10,15 @@ describe('client UA settings', () => {
   test('strips secrets and body before import, preserving duplicate headers for validation', () => {
     expect(
       extractIdentityHeaders(
-        'POST /v1/messages HTTP/1.1\r\nAuthorization: Bearer secret\r\nCookie: session=secret\r\nUser-Agent: claude-cli/2.1.319\r\nx-stainless-os: Linux\r\nuser-agent: claude-cli/2.1.318\r\n\r\nUser-Agent: codex/1.2.3'
+        'POST /v1/messages HTTP/1.1\r\nAuthorization: Bearer secret\r\nCookie: session=secret\r\nUser-Agent: claude-cli/2.1.319\r\nx-stainless-os: Linux\r\nuser-agent: claude-cli/2.1.318\r\n\r\nUser-Agent: codex/1.2.3',
+        'claude'
       )
     ).toBe('User-Agent: claude-cli/2.1.319\nx-stainless-os: Linux\nuser-agent: claude-cli/2.1.318');
-    expect(extractIdentityHeaders('POST / HTTP/1.0\n\nUser-Agent: codex/1.2.3')).toBe('');
+    expect(extractIdentityHeaders('POST / HTTP/1.0\n\nUser-Agent: codex/1.2.3', 'codex')).toBe('');
     expect(
       extractIdentityHeaders(
-        '\nUser-Agent: codex/1.2.3\nX-Codex-Beta-Features: multi_agent\nX-Api-Key: secret'
+        '\nUser-Agent: codex/1.2.3\nX-Codex-Beta-Features: multi_agent\nX-Api-Key: secret',
+        'codex'
       )
     ).toBe('User-Agent: codex/1.2.3\nX-Codex-Beta-Features: multi_agent');
   });
@@ -58,5 +60,24 @@ describe('client UA settings', () => {
     expect(userAgentDraft('claude', 'auto')).toEqual({ claudeHeaderUserAgent: 'auto' });
     expect(userAgentDraft('codex', '')).toEqual({ codexHeaderUserAgent: '' });
     expect(userAgentDraft('codex', 'codex/1.2.3')).toEqual({ codexHeaderUserAgent: 'codex/1.2.3' });
+  });
+
+  test('Gemini imports and applies only User-Agent', () => {
+    const userAgent = 'GeminiCLI/0.34.0/gemini-2.5-pro (darwin; arm64; terminal)';
+    expect(
+      extractIdentityHeaders(
+        `POST /v1beta/models/gemini HTTP/1.1\r\nAuthorization: Bearer secret\r\nCookie: a=secret\r\nUser-Agent: ${userAgent}\r\nx-goog-api-client: private\r\nX-Stainless-Os: Linux\r\nX-Codex-Beta-Features: private\r\n\r\nUser-Agent: fake/1.2.3`,
+        'gemini'
+      )
+    ).toBe(`User-Agent: ${userAgent}`);
+    expect(
+      clientProfileDraft({
+        ...sample,
+        provider: 'gemini',
+        headers: { ...sample.headers, 'User-Agent': userAgent, 'X-Goog-Api-Client': 'private' },
+      })
+    ).toEqual({ geminiHeaderUserAgent: userAgent });
+    expect(userAgentDraft('gemini', 'auto')).toEqual({ geminiHeaderUserAgent: 'auto' });
+    expect(userAgentDraft('gemini', '')).toEqual({ geminiHeaderUserAgent: '' });
   });
 });

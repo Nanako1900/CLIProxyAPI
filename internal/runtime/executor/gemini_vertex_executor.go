@@ -22,7 +22,6 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	internalsignature "github.com/router-for-me/CLIProxyAPI/v8/internal/signature"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/thinking"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
@@ -196,6 +195,13 @@ func (e *GeminiVertexExecutor) Identifier() string { return "vertex" }
 func (e *GeminiVertexExecutor) PrepareRequest(req *http.Request, auth *cliproxyauth.Auth) error {
 	if req == nil {
 		return nil
+	}
+	// Model requests dispatched through the OpenAI-compatible route keep its UA.
+	if req.URL != nil && !strings.Contains(req.URL.Path, "/endpoints/openapi/") {
+		path := req.URL.Path
+		if strings.Contains(path, "/models/") || strings.HasSuffix(path, "/models") || strings.HasSuffix(path, "/interactions") || strings.Contains(path, "/interactions/") {
+			helps.ApplyGeminiUserAgent(req, e.cfg, auth, "", nil)
+		}
 	}
 	apiKey, _ := vertexAPICreds(auth)
 	if strings.TrimSpace(apiKey) != "" {
@@ -503,12 +509,7 @@ func (e *GeminiVertexExecutor) executeWithServiceAccount(ctx context.Context, au
 		log.Errorf("vertex executor: access token error: %v", errTok)
 		return resp, statusErr{code: 500, msg: "internal server error"}
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(httpReq, attrs, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, baseModel, opts.Headers)
 
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
@@ -685,12 +686,7 @@ func (e *GeminiVertexExecutor) executeWithAPIKey(ctx context.Context, auth *clip
 	if apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", apiKey)
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(httpReq, attrs, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, baseModel, opts.Headers)
 
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
@@ -852,12 +848,7 @@ func (e *GeminiVertexExecutor) executeStreamWithServiceAccount(ctx context.Conte
 		log.Errorf("vertex executor: access token error: %v", errTok)
 		return nil, statusErr{code: 500, msg: "internal server error"}
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(httpReq, attrs, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, baseModel, opts.Headers)
 
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
@@ -1214,12 +1205,7 @@ func (e *GeminiVertexExecutor) executeStreamWithAPIKey(ctx context.Context, auth
 	if apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", apiKey)
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(httpReq, attrs, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, baseModel, opts.Headers)
 
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
@@ -1561,12 +1547,7 @@ func (e *GeminiVertexExecutor) countTokensWithServiceAccount(ctx context.Context
 		log.Errorf("vertex executor: access token error: %v", errTok)
 		return cliproxyexecutor.Response{}, statusErr{code: 500, msg: "internal server error"}
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(httpReq, attrs, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, baseModel, opts.Headers)
 
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
@@ -1670,12 +1651,7 @@ func (e *GeminiVertexExecutor) countTokensWithAPIKey(ctx context.Context, auth *
 	if apiKey != "" {
 		httpReq.Header.Set("x-goog-api-key", apiKey)
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(httpReq, attrs, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, baseModel, opts.Headers)
 
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
@@ -1976,15 +1952,9 @@ func (e *GeminiVertexExecutor) executeInteractions(ctx context.Context, auth *cl
 		}
 		httpReq.Header.Set("Authorization", "Bearer "+token)
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, doc.Get("model").String(), opts.Headers)
 	helps.ApplyGeminiInteractionsRequestHeaders(httpReq, opts.Headers)
 	helps.ApplyGeminiInteractionsRevisionHeader(httpReq)
-
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(httpReq, attrs, opts.Headers)
 
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
@@ -2106,15 +2076,9 @@ func (e *GeminiVertexExecutor) executeInteractionsStream(ctx context.Context, au
 		}
 		httpReq.Header.Set("Authorization", "Bearer "+token)
 	}
-	applyGeminiHeaders(httpReq, auth, opts.Headers)
+	helps.ApplyGeminiHeaders(httpReq, e.cfg, auth, doc.Get("model").String(), opts.Headers)
 	helps.ApplyGeminiInteractionsRequestHeaders(httpReq, opts.Headers)
 	helps.ApplyGeminiInteractionsRevisionHeader(httpReq)
-
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(httpReq, attrs, opts.Headers)
 
 	var authID, authLabel, authType, authValue string
 	if auth != nil {

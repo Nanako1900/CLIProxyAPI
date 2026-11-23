@@ -1,20 +1,33 @@
 import type { ClientProvider, ClientUserAgent } from '@/services/api/clientUserAgents';
 import type { VisualConfigValues } from '@/types/visualConfig';
 
-const fields: Record<string, keyof VisualConfigValues> = {
-  'User-Agent': 'claudeHeaderUserAgent',
-  'X-Stainless-Package-Version': 'claudeHeaderPackageVersion',
-  'X-Stainless-Runtime-Version': 'claudeHeaderRuntimeVersion',
-  'X-Stainless-Os': 'claudeHeaderOs',
-  'X-Stainless-Arch': 'claudeHeaderArch',
-  'X-Stainless-Timeout': 'claudeHeaderTimeout',
+export type ClientIdentityPatch = Partial<VisualConfigValues> & { geminiHeaderUserAgent?: string };
+
+export const clientProviderNames: Record<ClientProvider, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  gemini: 'Gemini',
 };
-const allowed = new Set(
-  [...Object.keys(fields), 'X-Codex-Beta-Features'].map((key) => key.toLowerCase())
-);
+
+const fields = {
+  claude: {
+    'User-Agent': 'claudeHeaderUserAgent',
+    'X-Stainless-Package-Version': 'claudeHeaderPackageVersion',
+    'X-Stainless-Runtime-Version': 'claudeHeaderRuntimeVersion',
+    'X-Stainless-Os': 'claudeHeaderOs',
+    'X-Stainless-Arch': 'claudeHeaderArch',
+    'X-Stainless-Timeout': 'claudeHeaderTimeout',
+  },
+  codex: {
+    'User-Agent': 'codexHeaderUserAgent',
+    'X-Codex-Beta-Features': 'codexHeaderBetaFeatures',
+  },
+  gemini: { 'User-Agent': 'geminiHeaderUserAgent' },
+} as const satisfies Record<ClientProvider, Record<string, keyof ClientIdentityPatch>>;
 
 // Strip unrelated headers and the body locally before contacting the management API.
-export function extractIdentityHeaders(raw: string): string {
+export function extractIdentityHeaders(raw: string, provider: ClientProvider): string {
+  const allowed = new Set(Object.keys(fields[provider]).map((header) => header.toLowerCase()));
   const result: string[] = [];
   let started = false;
   for (const line of raw.split(/\r?\n/)) {
@@ -36,22 +49,13 @@ export function extractIdentityHeaders(raw: string): string {
 export function userAgentDraft(
   provider: ClientProvider,
   userAgent: string
-): Partial<VisualConfigValues> {
-  return provider === 'claude'
-    ? { claudeHeaderUserAgent: userAgent }
-    : { codexHeaderUserAgent: userAgent };
+): ClientIdentityPatch {
+  return { [fields[provider]['User-Agent']]: userAgent };
 }
 
-export function clientProfileDraft(entry: ClientUserAgent): Partial<VisualConfigValues> {
+export function clientProfileDraft(entry: ClientUserAgent): ClientIdentityPatch {
   const result: Record<string, string> = {};
-  const mapping =
-    entry.provider === 'claude'
-      ? fields
-      : {
-          'User-Agent': 'codexHeaderUserAgent',
-          'X-Codex-Beta-Features': 'codexHeaderBetaFeatures',
-        };
-  for (const [header, field] of Object.entries(mapping)) {
+  for (const [header, field] of Object.entries(fields[entry.provider])) {
     const value = entry.headers[header];
     if (typeof value === 'string' && value.trim()) result[field] = value;
   }

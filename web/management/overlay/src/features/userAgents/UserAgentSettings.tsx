@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -5,10 +6,11 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import type { ClientProvider } from '@/services/api/clientUserAgents';
-import type {
-  UserAgentDraft,
-  UserAgentProviderStatus,
-  ClaudeIdentityDraft,
+import {
+  isValidUserAgent,
+  type UserAgentDraft,
+  type UserAgentProviderStatus,
+  type ClaudeIdentityDraft,
 } from '@/services/api/userAgentPanel';
 import styles from './UserAgentsPage.module.scss';
 
@@ -22,6 +24,8 @@ type Props = {
 
 export function UserAgentSettings({ provider, draft, status, disabled, onChange }: Props) {
   const { t } = useTranslation();
+  const uaInputId = useId();
+  const gemini = provider === 'gemini';
   const current = draft[provider];
   const mode = !current.userAgent.trim()
     ? 'default'
@@ -53,15 +57,23 @@ export function UserAgentSettings({ provider, draft, status, disabled, onChange 
               variant={mode === value ? 'primary' : 'ghost'}
               disabled={disabled}
               aria-pressed={mode === value}
-              onClick={() =>
+              onClick={() => {
+                if (gemini && value === 'fixed') {
+                  const input = document.getElementById(uaInputId);
+                  if (input instanceof HTMLInputElement) {
+                    input.focus();
+                    input.select();
+                  }
+                  return;
+                }
                 setUA(
                   value === 'default'
                     ? ''
                     : value === 'auto'
                       ? 'auto'
                       : status?.resolvedUserAgent || status?.defaultUserAgent || current.userAgent
-                )
-              }
+                );
+              }}
             >
               {t('ua_panel.mode_' + value)}
             </Button>
@@ -69,14 +81,18 @@ export function UserAgentSettings({ provider, draft, status, disabled, onChange 
         </div>
         <Input
           label="User-Agent"
+          id={uaInputId}
           value={current.userAgent}
           disabled={disabled}
           spellCheck={false}
           placeholder={t('ua_panel.default_placeholder')}
-          hint={t('ua_panel.ua_hint')}
+          hint={t(gemini ? 'ua_panel.gemini_ua_hint' : 'ua_panel.ua_hint')}
+          error={gemini && !isValidUserAgent(current.userAgent) ? t('ua_panel.invalid_ua') : undefined}
           onChange={(event) => setUA(event.target.value)}
         />
-        {mode === 'auto' && <p className={styles.note}>{t('ua_panel.auto_scope')}</p>}
+        {mode === 'auto' && (
+          <p className={styles.note}>{t(gemini ? 'ua_panel.gemini_auto_scope' : 'ua_panel.auto_scope')}</p>
+        )}
         <p className={styles.muted}>{t('ua_panel.scope_' + provider)}</p>
         {provider === 'claude' ? (
           <>
@@ -149,7 +165,7 @@ export function UserAgentSettings({ provider, draft, status, disabled, onChange 
               ))}
             </div>
           </>
-        ) : (
+        ) : provider === 'codex' && (
           <Input
             label="X-Codex-Beta-Features"
             value={draft.codex.betaFeatures}

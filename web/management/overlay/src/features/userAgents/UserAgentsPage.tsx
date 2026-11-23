@@ -7,7 +7,7 @@ import { Modal } from '@/components/ui/Modal';
 import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
 import { useUnsavedChangesGuard } from '@/hooks/useUnsavedChangesGuard';
 import { ClientUserAgentPicker } from '@/features/config/components/blocks/ClientUserAgentPicker';
-import type { VisualConfigValues } from '@/types/visualConfig';
+import { clientProviderNames, type ClientIdentityPatch } from '@/features/config/clientUserAgents';
 import type { ClientProvider } from '@/services/api/clientUserAgents';
 import {
   userAgentPanelConnection,
@@ -52,6 +52,8 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
   const dirty = changes.length > 0;
   const disabled = !connected || loading || saving;
   const runtime = snapshot?.runtime;
+  const gemini = provider === 'gemini';
+  const defaultUserAgent = t(gemini ? 'ua_panel.gemini_channel_default' : 'ua_panel.unset');
   const status = runtime?.providers.find((item) => item.provider === provider);
   const overrides = runtime?.overrides.filter((item) => item.provider === provider) || [];
   const formatDate = (value?: string) =>
@@ -151,7 +153,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
       if (alive.current) setSaving(false);
     }
   };
-  const applySample = (patch: Partial<VisualConfigValues>) => {
+  const applySample = (patch: ClientIdentityPatch) => {
     setNotice('');
     setDraft((previous) => {
       if (!previous) return previous;
@@ -167,11 +169,13 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
       if (provider === 'claude') {
         for (const [source, target] of mappings)
           if (typeof patch[source] === 'string') next.claude[target] = patch[source];
-      } else {
+      } else if (provider === 'codex') {
         if (typeof patch.codexHeaderUserAgent === 'string')
           next.codex.userAgent = patch.codexHeaderUserAgent;
         if (typeof patch.codexHeaderBetaFeatures === 'string')
           next.codex.betaFeatures = patch.codexHeaderBetaFeatures;
+      } else if (typeof patch.geminiHeaderUserAgent === 'string') {
+        next.gemini.userAgent = patch.geminiHeaderUserAgent;
       }
       return next;
     });
@@ -217,7 +221,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
       </header>
       <div className={styles.providerBar}>
         <div className={styles.segmented} role="group" aria-label={t('ua_panel.provider')}>
-          {(['claude', 'codex'] as const).map((value) => (
+          {(['claude', 'codex', 'gemini'] as const).map((value) => (
             <Button
               key={value}
               className={styles.providerButton}
@@ -225,7 +229,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
               aria-pressed={provider === value}
               onClick={() => setProvider(value)}
             >
-              {value === 'claude' ? 'Claude Code' : 'Codex'}
+              {clientProviderNames[value]}
             </Button>
           ))}
         </div>
@@ -247,7 +251,11 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
         </p>
       )}
       {runtime?.homeMode && <p className={styles.note}>{t('ua_panel.home_mode')}</p>}
-      {snapshot && !runtime && <p className={styles.note}>{t('ua_panel.runtime_unavailable')}</p>}
+      {snapshot && (!runtime || (gemini && !status)) && (
+        <p className={styles.note}>
+          {t(gemini ? 'ua_panel.gemini_runtime_unavailable' : 'ua_panel.runtime_unavailable')}
+        </p>
+      )}
       {status && (
         <>
           <div className={styles.stats}>
@@ -277,8 +285,12 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
               extra={<span className={styles.eyebrow}>{t('ua_panel.saved_state')}</span>}
             >
               <div className={styles.stack}>
-                <div className={styles.identity}>{status.resolvedUserAgent}</div>
-                <p className={styles.muted}>{t('ua_panel.baseline_hint')}</p>
+                <div className={styles.identity}>
+                  {status.resolvedUserAgent || defaultUserAgent}
+                </div>
+                <p className={styles.muted}>
+                  {t(gemini ? 'ua_panel.gemini_baseline_hint' : 'ua_panel.baseline_hint')}
+                </p>
                 {versionSplit && (
                   <p className={`${styles.note} ${styles.warning}`}>
                     {t('ua_panel.version_split', { ua: uaVersion, billing: status.billingVersion })}
@@ -287,7 +299,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
                 <dl className={styles.facts}>
                   <div>
                     <dt>{t('ua_panel.builtin_ua')}</dt>
-                    <dd>{status.defaultUserAgent}</dd>
+                    <dd>{status.defaultUserAgent || defaultUserAgent}</dd>
                   </div>
                   {Object.entries(status.baselineHeaders).map(([name, value]) => (
                     <div key={name}>
@@ -352,7 +364,9 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
                 >
                   {status.auto.registryURL}
                 </a>
-                <p className={styles.muted}>{t('ua_panel.updater_hint')}</p>
+                <p className={styles.muted}>
+                  {t(gemini ? 'ua_panel.gemini_updater_hint' : 'ua_panel.updater_hint')}
+                </p>
                 <p className={styles.muted}>{t('ua_panel.refresh_hint')}</p>
               </div>
             </Card>
@@ -384,7 +398,9 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
               onChange={applySample}
             />
           )}
-          <p className={styles.muted}>{t('ua_panel.catalog_hint')}</p>
+          <p className={styles.muted}>
+            {t(gemini ? 'ua_panel.gemini_catalog_hint' : 'ua_panel.catalog_hint')}
+          </p>
         </Card>
       )}
       {runtime && (
@@ -394,7 +410,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
         >
           <div className={styles.stack}>
             <p className={styles.muted}>{t('ua_panel.overrides_hint')}</p>
-            {!runtime.overrideInventoryAvailable ? (
+            {!runtime.overrideInventoryAvailable || (gemini && !status) ? (
               <p>{t('ua_panel.inventory_unavailable')}</p>
             ) : !overrides.length ? (
               <p>{t('ua_panel.no_overrides')}</p>

@@ -25,6 +25,22 @@ func TestParseWhitelistsIdentityAndStopsBeforeBody(t *testing.T) {
 	}
 }
 
+func TestGeminiCLIProfileContainsOnlyUserAgent(t *testing.T) {
+	const ua = "GeminiCLI/0.41.2-preview.1/gemini-2.5-pro(high) (linux; arm64)"
+	profile, err := Parse("User-Agent: " + ua + "\nX-Goog-Api-Client: sdk-private\nX-Stainless-Timeout: 123\nAuthorization: secret")
+	if err != nil || profile.Provider != "gemini" || profile.Version != "0.41.2-preview.1" || len(profile.Headers) != 1 || profile.Headers["User-Agent"] != ua {
+		t.Fatalf("unexpected Gemini profile: %#v, error: %v", profile, err)
+	}
+	if _, err := Parse("User-Agent: GeminiCLI/0.41.2/models/model with spaces (linux; arm64; terminal)"); err != nil {
+		t.Errorf("model containing spaces: %v", err)
+	}
+	for _, invalid := range []string{"GeminiCLI/0.41.2/ (linux; arm64)", "GeminiCLI/latest/model", "GeminiCLI/0.41.2", "GeminiCLI/0.41.2/model extra"} {
+		if _, err := Parse("User-Agent: " + invalid); err == nil {
+			t.Errorf("accepted invalid identity %q", invalid)
+		}
+	}
+}
+
 func TestRecognizedClientFamilies(t *testing.T) {
 	for _, family := range []string{"claude-cli", "codex-tui", "codex_cli_rs", "codex_exec", "codex_vscode", "codex", "Codex Desktop"} {
 		t.Run(family, func(t *testing.T) {

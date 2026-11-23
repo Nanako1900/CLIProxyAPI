@@ -20,7 +20,7 @@ func (h *Handler) ClientUserAgents(c *gin.Context) {
 	}
 	provider := strings.TrimSpace(c.Query("provider"))
 	if !clientua.ValidProvider(provider) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "provider must be claude or codex"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "provider must be claude, codex, or gemini"})
 		return
 	}
 	c.Header("Cache-Control", "no-store")

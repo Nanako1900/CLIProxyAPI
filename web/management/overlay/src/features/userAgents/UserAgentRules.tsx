@@ -28,9 +28,15 @@ const codexRules = [
   ['codex_ws', 'X-Codex-Beta-Features / WebSocket'],
   ['codex_session', 'Session / conversation / request headers'],
 ] as const;
+const rulesByProvider = {
+  claude: claudeRules,
+  codex: codexRules,
+  gemini: [['gemini_origin', 'User-Agent']],
+} as const;
 
 export function UserAgentRules({ provider }: { provider: ClientProvider }) {
   const { t } = useTranslation();
+  const gemini = provider === 'gemini';
   return (
     <Card title={t('ua_panel.rules')}>
       <div className={styles.stack}>
@@ -38,13 +44,13 @@ export function UserAgentRules({ provider }: { provider: ClientProvider }) {
           {['credential', 'provider', 'native'].map((key) => (
             <li key={key}>
               <strong>{t('ua_panel.priority_' + key)}</strong>
-              <p>{t('ua_panel.priority_' + key + '_hint')}</p>
+              <p>{t('ua_panel.priority_' + (gemini && key !== 'credential' ? 'gemini_' : '') + key + '_hint')}</p>
             </li>
           ))}
         </ol>
         <p className={styles.note}>{t('ua_panel.rules_hint')}</p>
         <div className={styles.ruleList}>
-          {(provider === 'claude' ? claudeRules : codexRules).map(([key, headers]) => (
+          {rulesByProvider[provider].map(([key, headers]) => (
             <details key={key} className={styles.rule}>
               <summary>
                 <strong>{t('ua_panel.rule_' + key + '_title')}</strong>

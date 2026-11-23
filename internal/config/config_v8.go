@@ -104,6 +104,7 @@ func buildV8Paths() []configPath {
 		{"claude", "upstream.claude"}, {"claude-code", "upstream.claude"},
 		{"disable-claude-cloak-mode", "upstream.claude.disable-claude-cloak-mode"},
 		{"claude-header-defaults", "upstream.claude.header-defaults"},
+		{"gemini-header-defaults", "upstream.gemini.header-defaults"},
 		{"antigravity", "oauth.providers.antigravity"},
 		{"antigravity-signature-cache-enabled", "oauth.providers.antigravity.signature-cache-enabled"},
 		{"antigravity-signature-bypass-strict", "oauth.providers.antigravity.signature-bypass-strict"},
@@ -420,6 +421,16 @@ func expandV8Groups(groups *yaml.Node, provider string) (*yaml.Node, error) {
 		}
 		if err := validateWeightSequenceNode(keys, "api-keys."+provider+".keys"); err != nil {
 			return nil, err
+		}
+		// Check the stored group default even when every key replaces its headers.
+		if node := yamlPath(group, "headers"); usesGeminiUserAgent(provider) && node != nil {
+			var headers map[string]string
+			if err := node.Decode(&headers); err != nil {
+				return nil, fmt.Errorf("api-keys.%s[%d].headers: %w", provider, index, err)
+			}
+			if err := validateUserAgentHeaders(headers, true); err != nil {
+				return nil, fmt.Errorf("api-keys.%s[%d].headers: %w", provider, index, err)
+			}
 		}
 		if provider == "openai-compatibility" {
 			item := deepCopyNode(group)

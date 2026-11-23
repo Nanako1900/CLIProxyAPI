@@ -11,15 +11,20 @@ import {
   type ClientUserAgent,
 } from '@/services/api/clientUserAgents';
 import { useAuthStore } from '@/stores/useAuthStore';
-import type { VisualConfigValues } from '@/types/visualConfig';
-import { clientProfileDraft, extractIdentityHeaders, userAgentDraft } from '../../clientUserAgents';
+import {
+  clientProfileDraft,
+  clientProviderNames,
+  extractIdentityHeaders,
+  userAgentDraft,
+  type ClientIdentityPatch,
+} from '../../clientUserAgents';
 import styles from './ClientUserAgentPicker.module.scss';
 
 type Props = {
   provider: ClientProvider;
   limit?: number;
   disabled?: boolean;
-  onChange: (patch: Partial<VisualConfigValues>) => void;
+  onChange: (patch: ClientIdentityPatch) => void;
 };
 
 export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChange }: Props) {
@@ -44,9 +49,16 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
   const [sourceFilter, setSourceFilter] = useState('all');
   const [copyState, setCopyState] = useState('');
   const ns = 'client_user_agents.';
+  const gemini = provider === 'gemini';
+  const sampleProvider = gemini ? 'Gemini CLI' : clientProviderNames[provider];
   const currentRevision = apiClient.getConnectionRevision();
   const current = authenticated && catalog.revision === currentRevision;
   const entry = current ? catalog.items.find((item) => item.id === selected) : undefined;
+  const entryHeaders = entry
+    ? gemini
+      ? { 'User-Agent': entry.headers['User-Agent'] }
+      : entry.headers
+    : {};
   const blocked = disabled || !current || loading || busy;
 
   useEffect(() => {
@@ -107,9 +119,9 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
     if (blocked) return;
     const revision = apiClient.getConnectionRevision();
     const request = generation.current;
-    const headers = extractIdentityHeaders(raw);
+    const headers = extractIdentityHeaders(raw, provider);
     if (!headers || new TextEncoder().encode(raw).length > 32768) {
-      setError(t(ns + 'invalid_import'));
+      setError(t(ns + (gemini ? 'gemini_invalid_import' : 'invalid_import')));
       return;
     }
     setBusy(true);
@@ -170,22 +182,24 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
         (item) =>
           (sourceFilter === 'all' ||
             (sourceFilter === 'observed' ? item.observed : item.imported)) &&
-          Object.values(item.headers).join(' ').toLowerCase().includes(search.toLowerCase())
+          (gemini ? item.headers['User-Agent'] || '' : Object.values(item.headers).join(' '))
+            .toLowerCase()
+            .includes(search.toLowerCase())
       )
       .map((item) => ({
         value: item.id,
-        label: `${source(item)} · ${item.headers['User-Agent']}${item.headers['X-Stainless-Package-Version'] ? ' · SDK ' + item.headers['X-Stainless-Package-Version'] : ''}`,
+        label: `${source(item)} · ${item.headers['User-Agent']}${provider === 'claude' && item.headers['X-Stainless-Package-Version'] ? ' · SDK ' + item.headers['X-Stainless-Package-Version'] : ''}`,
       })),
   ];
 
   return (
     <section
       className={styles.picker}
-      aria-label={t(ns + 'title', { provider: provider === 'claude' ? 'Claude Code' : 'Codex' })}
+      aria-label={t(ns + 'title', { provider: sampleProvider })}
     >
       <div className={styles.heading}>
         <strong>
-          {t(ns + 'title', { provider: provider === 'claude' ? 'Claude Code' : 'Codex' })}
+          {t(ns + 'title', { provider: sampleProvider })}
         </strong>
         <div className={styles.actions}>
           <Button
@@ -215,7 +229,7 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
       <p className={styles.hint}>{t(ns + provider + '_scope')}</p>
       <div className={styles.filters}>
         <Input
-          label={t('ua_panel.search_samples')}
+          label={t(gemini ? 'ua_panel.gemini_search_samples' : 'ua_panel.search_samples')}
           value={search}
           onChange={(event) => {
             setSearch(event.target.value);
@@ -250,7 +264,7 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
         value={selected}
         options={options}
         disabled={blocked}
-        ariaLabel={t(ns + 'select', { provider })}
+        ariaLabel={t(ns + 'select', { provider: sampleProvider })}
         placeholder={t(ns + (loading ? 'loading' : 'placeholder'))}
         onChange={(value) => {
           setSelected(value);
@@ -282,13 +296,15 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
             </div>
           </dl>
           <pre>
-            {Object.entries(entry.headers)
+            {Object.entries(entryHeaders)
               .map(([key, value]) => `${key}: ${value}`)
               .join('\n')}
           </pre>
         </div>
       )}
-      {selected === 'auto' && <p className={styles.hint}>{t(ns + 'auto_hint')}</p>}
+      {selected === 'auto' && (
+        <p className={styles.hint}>{t(gemini ? 'ua_panel.gemini_auto_scope' : ns + 'auto_hint')}</p>
+      )}
       <div className={styles.actions}>
         <Button
           type="button"
@@ -298,7 +314,7 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
         >
           {t(ns + 'apply_ua')}
         </Button>
-        {entry && Object.keys(entry.headers).length > 1 && (
+        {entry && Object.keys(entryHeaders).length > 1 && (
           <Button
             type="button"
             size="sm"
@@ -318,7 +334,7 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
             onClick={async () => {
               try {
                 await navigator.clipboard.writeText(
-                  Object.entries(entry.headers)
+                  Object.entries(entryHeaders)
                     .map(([name, value]) => `${name}: ${value}`)
                     .join('\n')
                 );
@@ -378,7 +394,7 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
           </Button>
         }
       >
-        <p>{t(ns + 'import_hint')}</p>
+        <p>{t(ns + (gemini ? 'gemini_import_hint' : 'import_hint'))}</p>
         <textarea
           className={`input ${styles.importText}`}
           aria-label={t(ns + 'headers')}
