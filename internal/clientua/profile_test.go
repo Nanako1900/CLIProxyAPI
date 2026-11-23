@@ -2,6 +2,8 @@ package clientua
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -82,6 +84,78 @@ func TestGeminiCLIRejectsUnrelatedIdentities(t *testing.T) {
 		if _, err := FromHeaders(http.Header{"User-Agent": {ua}}); err == nil {
 			t.Errorf("accepted %q", ua)
 		}
+	}
+}
+
+const observedGenAIGoUA = "google-genai-sdk/1.79.1 gl-go/go1.28-20261102-RC01 cl/1012564305 +298f53e483 X:fieldtrack,boringcrypto,nogolistexportnewformat"
+
+func TestGoogleGenAIGoUserAgents(t *testing.T) {
+	for _, tc := range []struct{ ua, version string }{
+		{observedGenAIGoUA, "1.79.1"},
+		{"google-genai-sdk/1.52.0 gl-go/go1.25.4", "1.52.0"},
+		{"google-genai-sdk/1.0.0-beta.1 gl-go/go1.26rc2", "1.0.0-beta.1"},
+		{"google-genai-sdk/1.79.1+vertex-genai-modules/0.20.0 gl-go/go1.26.10", "1.79.1"},
+		{"google-genai-sdk/1.79.1 gl-go/devel go1.21-db3f952b1f", "1.79.1"},
+		{"google-genai-sdk/1.79.1 gl-go/devel go1.24-ffb3e574 Thu Aug 29 20:16:26 2024 +0000", "1.79.1"},
+		{"google-genai-sdk/1.79.1 gl-go/go1.27-devel_abcd1234 Mon Nov 2 16:05:30 2026 -0700 X:boringcrypto", "1.79.1"},
+	} {
+		profile, err := Parse("User-Agent: " + tc.ua + "\nX-Goog-Api-Client: sdk-private\nX-Stainless-Timeout: 600\nAuthorization: secret")
+		if err != nil || profile.Provider != "gemini" || profile.ClientKind != "google-genai-go" || profile.Version != tc.version || len(profile.Headers) != 1 || profile.Headers["User-Agent"] != tc.ua {
+			t.Errorf("parse %q: got %#v, error %v", tc.ua, profile, err)
+		}
+	}
+}
+
+func TestGoogleGenAIGoRequiresSDKAndGoRuntimeInUserAgent(t *testing.T) {
+	for _, ua := range []string{
+		"", "Go-http-client/1.1", "google-api-go-client/0.5", "google-genai-sdk/1.79.1",
+		"google-genai-sdk/latest gl-go/go1.26.10", "google-genai-sdk/1.79 gl-go/go1.26.10",
+		"google-genai-sdk/1.79.1 gl-python/3.13.2", "google-genai-sdk/1.79.1 gl-node/v22.0.0",
+		"google-genai-sdk/1.79.1 gl-go/unknown", "other/1.0.0 google-genai-sdk/1.79.1 gl-go/go1.26.10",
+		"google-genai-sdk/1.79.1 gl-go/go1.26.10 unrelated/1.0", "google-genai-sdk/1.79.1 gl-go/go1.26.10 X:fieldtrack,",
+		"google-genai-sdk/1.79.1 gl-go/devel go1.24-notarevision", "google-genai-sdk/1.79.1 gl-python/devel go1.24-ffb3e574",
+		"google-genai-sdk/1.79.1 gl-go/devel go1.24-ffb3e574 unrelated/1.0",
+		"google-genai-sdk/1.79.1 gl-go/devel go1.24-ffb3e574 Thu Aug 29 20:16:26 2024 +0000 unrelated/1.0",
+		"google-genai-sdk/1.79.1 gl-go/go1.27-devel_abcd1234 Mon Nov 2 16:05:30 2026 -0700 unrelated/1.0",
+	} {
+		headers := http.Header{"User-Agent": {ua}, "X-Goog-Api-Client": {observedGenAIGoUA}}
+		if _, err := FromHeaders(headers); err == nil {
+			t.Errorf("accepted unrelated User-Agent %q", ua)
+		}
+	}
+}
+
+func TestGoogleGenAIGoCatalogRoundTrip(t *testing.T) {
+	const legacyUA = "GeminiCLI/0.41.2/gemini-2.5-pro (linux; arm64)"
+	const legacyID = "76fe89b8e991e9f5b34ae9be"
+	path := filepath.Join(t.TempDir(), "catalog.yaml")
+	legacy := "- id: " + legacyID + "\n  provider: gemini\n  version: 0.41.2\n  headers:\n    User-Agent: " + legacyUA + "\n  observed: true\n  count: 3\n"
+	if err := os.WriteFile(path, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	catalog := newTestStore(t, path)
+	catalog.Observe(http.Header{"User-Agent": {observedGenAIGoUA}, "Authorization": {"secret"}})
+	profile, err := Parse("User-Agent: " + observedGenAIGoUA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := catalog.Import(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Close(); err != nil {
+		t.Fatal(err)
+	}
+	entries := newTestStore(t, path).List("gemini")
+	if len(entries) != 2 {
+		t.Fatalf("reloaded %d samples, want legacy CLI and Go SDK", len(entries))
+	}
+	sdk, cli := entries[0], entries[1]
+	if sdk.ID != imported.ID || !sdk.Observed || !sdk.Imported || sdk.Count != 1 || sdk.ClientKind != "google-genai-go" || sdk.Version != "1.79.1" || len(sdk.Headers) != 1 || sdk.Headers["User-Agent"] != observedGenAIGoUA {
+		t.Errorf("reloaded SDK sample: %#v", sdk)
+	}
+	if cli.ID != legacyID || cli.ClientKind != "" || cli.Count != 3 || cli.Headers["User-Agent"] != legacyUA {
+		t.Errorf("reloaded legacy sample: %#v", cli)
 	}
 }
 

@@ -17,6 +17,12 @@ import (
 
 const LimitPerProvider = 100
 
+// CaptureStats counts authenticated requests inspected across all providers since startup.
+type CaptureStats struct {
+	Inspected    uint64 `json:"inspected"`
+	Unrecognized uint64 `json:"unrecognized"`
+}
+
 type Entry struct {
 	ID        string `json:"id" yaml:"id"`
 	Profile   `yaml:",inline"`
@@ -33,6 +39,7 @@ type Store struct {
 	mu         sync.RWMutex
 	saveMu     sync.Mutex
 	entries    map[string]Entry
+	stats      CaptureStats
 	path       string
 	now        func() time.Time
 	generation uint64
@@ -90,9 +97,17 @@ func (s *Store) Observe(headers http.Header) {
 		return
 	}
 	profile, errProfile := FromHeaders(headers)
-	if errProfile == nil {
-		s.add(profile, false)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
 	}
+	s.stats.Inspected++
+	if errProfile != nil {
+		s.stats.Unrecognized++
+		return
+	}
+	s.addLocked(profile, false)
 }
 
 func (s *Store) Import(profile Profile) (Entry, error) {
@@ -107,22 +122,20 @@ func (s *Store) Import(profile Profile) (Entry, error) {
 	if validated.Provider != profile.Provider {
 		return Entry{}, fmt.Errorf("User-Agent does not match the selected provider")
 	}
-	entry := s.add(validated, true)
-	if entry.ID == "" {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
 		return Entry{}, fmt.Errorf("client UA catalog is closed")
 	}
+	entry := s.addLocked(validated, true)
+	s.mu.Unlock()
 	if errSave := s.Flush(); errSave != nil {
 		return Entry{}, errSave
 	}
 	return entry, nil
 }
 
-func (s *Store) add(profile Profile, imported bool) Entry {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return Entry{}
-	}
+func (s *Store) addLocked(profile Profile, imported bool) Entry {
 	id, now := profile.id(), s.now().UTC()
 	entry, exists := s.entries[id]
 	if !exists {
@@ -169,9 +182,15 @@ func (s *Store) listLocked(provider string) []Entry {
 }
 
 func (s *Store) List(provider string) []Entry {
+	entries, _ := s.Snapshot(provider)
+	return entries
+}
+
+// Snapshot pairs a provider's samples with the instance-wide counters at the same instant.
+func (s *Store) Snapshot(provider string) ([]Entry, CaptureStats) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.listLocked(provider)
+	return s.listLocked(provider), s.stats
 }
 
 // Persistent reports the startup storage mode without exposing the auth directory.

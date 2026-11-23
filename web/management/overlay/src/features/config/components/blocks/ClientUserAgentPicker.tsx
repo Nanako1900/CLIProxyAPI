@@ -9,12 +9,15 @@ import {
   clientUserAgentsConnection,
   type ClientProvider,
   type ClientUserAgent,
+  type ClientUserAgentCaptureStats,
+  type ClientUserAgentCatalog,
 } from '@/services/api/clientUserAgents';
 import { useAuthStore } from '@/stores/useAuthStore';
 import {
   clientProfileDraft,
   clientProviderNames,
   extractIdentityHeaders,
+  geminiUserAgentLabels,
   userAgentDraft,
   type ClientIdentityPatch,
 } from '../../clientUserAgents';
@@ -27,6 +30,19 @@ type Props = {
   onChange: (patch: ClientIdentityPatch) => void;
 };
 
+export function GeminiCaptureStats({ captureStats }: { captureStats?: ClientUserAgentCaptureStats }) {
+  const { t } = useTranslation();
+  if (!captureStats) {
+    return <p className={styles.hint}>{t('ua_panel.capture_stats_unavailable')}</p>;
+  }
+  return (
+    <>
+      <p className={styles.hint}>{t('ua_panel.capture_stats', captureStats)}</p>
+      <p className={styles.hint}>{t('ua_panel.capture_stats_scope')}</p>
+    </>
+  );
+}
+
 export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChange }: Props) {
   const { t, i18n } = useTranslation();
   const apiBase = useAuthStore((state) => state.apiBase);
@@ -34,7 +50,7 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
   const authenticated = useAuthStore((state) => state.isAuthenticated);
   const generation = useRef(0);
   const [reload, setReload] = useState(0);
-  const [catalog, setCatalog] = useState<{ items: ClientUserAgent[]; revision: number }>({
+  const [catalog, setCatalog] = useState<ClientUserAgentCatalog & { revision: number }>({
     items: [],
     revision: -1,
   });
@@ -50,7 +66,7 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
   const [copyState, setCopyState] = useState('');
   const ns = 'client_user_agents.';
   const gemini = provider === 'gemini';
-  const sampleProvider = gemini ? 'Gemini CLI' : clientProviderNames[provider];
+  const sampleProvider = clientProviderNames[provider];
   const currentRevision = apiClient.getConnectionRevision();
   const current = authenticated && catalog.revision === currentRevision;
   const entry = current ? catalog.items.find((item) => item.id === selected) : undefined;
@@ -86,7 +102,7 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
       connection
         .list(provider)
         .then((result) => {
-          if (valid()) setCatalog({ items: result.items, revision });
+          if (valid()) setCatalog({ ...result, revision });
         })
         .catch(() => {
           if (valid()) setError(t('client_user_agents.load_error'));
@@ -134,7 +150,7 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
       if (!valid()) return;
       const result = await connection.list(provider);
       if (!valid()) return;
-      setCatalog({ items: result.items, revision });
+      setCatalog({ ...result, revision });
       setSelected(imported.id);
       setImportOpen(false);
       setRaw('');
@@ -188,7 +204,16 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
       )
       .map((item) => ({
         value: item.id,
-        label: `${source(item)} · ${item.headers['User-Agent']}${provider === 'claude' && item.headers['X-Stainless-Package-Version'] ? ' · SDK ' + item.headers['X-Stainless-Package-Version'] : ''}`,
+        label: [
+          source(item),
+          gemini && t('ua_panel.' + geminiUserAgentLabels(item).client),
+          item.headers['User-Agent'],
+          provider === 'claude' &&
+            item.headers['X-Stainless-Package-Version'] &&
+            `SDK ${item.headers['X-Stainless-Package-Version']}`,
+        ]
+          .filter(Boolean)
+          .join(' · '),
       })),
   ];
 
@@ -260,6 +285,7 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
           {t('ua_panel.sample_total', { count: catalog.items.length, limit })}
         </p>
       )}
+      {current && gemini && <GeminiCaptureStats captureStats={catalog.captureStats} />}
       <Select
         value={selected}
         options={options}
@@ -285,7 +311,7 @@ export function ClientUserAgentPicker({ provider, limit = 100, disabled, onChang
               <dd>{new Date(entry.firstSeen).toLocaleString(i18n.language)}</dd>
             </div>
             <div>
-              <dt>{t('ua_panel.client_version')}</dt>
+              <dt>{t('ua_panel.' + (gemini ? geminiUserAgentLabels(entry).version : 'client_version'))}</dt>
               <dd>{entry.version}</dd>
             </div>
             <div>

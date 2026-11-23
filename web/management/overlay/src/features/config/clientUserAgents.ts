@@ -9,6 +9,12 @@ export const clientProviderNames: Record<ClientProvider, string> = {
   gemini: 'Gemini',
 };
 
+export function geminiUserAgentLabels(entry: ClientUserAgent) {
+  return entry.clientKind === 'google-genai-go'
+    ? { client: 'gemini_go_sdk', version: 'sdk_version' }
+    : { client: 'gemini_cli', version: 'client_version' };
+}
+
 const fields = {
   claude: {
     'User-Agent': 'claudeHeaderUserAgent',

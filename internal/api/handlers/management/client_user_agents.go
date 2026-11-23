@@ -26,7 +26,8 @@ func (h *Handler) ClientUserAgents(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	switch c.Request.Method {
 	case http.MethodGet:
-		c.JSON(http.StatusOK, gin.H{"items": h.clientUserAgents.List(provider), "limit": clientua.LimitPerProvider})
+		items, stats := h.clientUserAgents.Snapshot(provider)
+		c.JSON(http.StatusOK, gin.H{"items": items, "limit": clientua.LimitPerProvider, "captureStats": stats})
 	case http.MethodPost:
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2*clientua.MaxImportBytes)
 		var input struct {

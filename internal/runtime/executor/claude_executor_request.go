@@ -1130,6 +1130,17 @@ func claudeCredentialUsesOAuth(auth *cliproxyauth.Auth, apiKey string) bool {
 	return !hasAPIKeyAttr
 }
 
+func applyClaudeCredentialHeaders(r *http.Request, cfg *config.Config, auth *cliproxyauth.Auth, useAPIKey bool, policy claudeWirePolicy, incomingHeaders http.Header) {
+	if useAPIKey && !policy.ProfileClaudeCodeCLI && !policy.Cloak && !policy.Uncloak {
+		helps.ApplyClaudeAPIKeyHeaders(r, cfg, auth, incomingHeaders)
+		return
+	}
+	if auth != nil {
+		util.ApplyCustomHeadersFromAttrs(r, auth.Attributes, incomingHeaders)
+	}
+	helps.ApplyConfiguredUserAgent(r.Context(), r.Header, cfg, auth, "claude", incomingHeaders)
+}
+
 func copyClaudeCallerFingerprintHeaders(dst, src http.Header, confirmedClaudeCode, uncloak bool) {
 	if dst == nil || src == nil {
 		return
@@ -1483,11 +1494,7 @@ func applyClaudeHeadersWithNativeProfile(
 		if sessionID != "" {
 			r.Header.Set("X-Claude-Code-Session-Id", sessionID)
 		}
-		var attrs map[string]string
-		if auth != nil {
-			attrs = auth.Attributes
-		}
-		util.ApplyCustomHeadersFromAttrs(r, attrs, incomingHeaders)
+		applyClaudeCredentialHeaders(r, cfg, auth, useAPIKey, wirePolicy, incomingHeaders)
 		// Scope the custom-header escape hatch exactly like the CLI path below, which
 		// claws overrides back on api.anthropic.com (an operator Anthropic-Beta reaches
 		// a first-party API that rejects unknown values) and on any streaming request
@@ -1511,7 +1518,6 @@ func applyClaudeHeadersWithNativeProfile(
 		} else if stream {
 			restoreCallerTransport()
 		}
-		helps.ApplyConfiguredUserAgent(r.Context(), r.Header, cfg, auth, "claude", incomingHeaders)
 		return nil
 	}
 
@@ -1650,11 +1656,7 @@ func applyClaudeHeadersWithNativeProfile(
 	} else {
 		helps.ApplyClaudeLegacyDeviceHeaders(r, incomingHeaders, cfg, confirmedClaudeCode)
 	}
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(r, attrs, incomingHeaders)
+	applyClaudeCredentialHeaders(r, cfg, auth, useAPIKey, wirePolicy, incomingHeaders)
 	// Custom credential headers are a configuration escape hatch for third-party
 	// gateways, so they keep the last word there. On api.anthropic.com they must
 	// not rewrite the reconstructed identity: an overridden Anthropic-Beta yields a
@@ -1669,7 +1671,6 @@ func applyClaudeHeadersWithNativeProfile(
 		// silently disable event negotiation.
 		applyTransportNegotiation()
 	}
-	helps.ApplyConfiguredUserAgent(r.Context(), r.Header, cfg, auth, "claude", incomingHeaders)
 	return nil
 }
 

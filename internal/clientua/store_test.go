@@ -31,6 +31,7 @@ func TestStoreDeduplicatesAndPersistsOnlyIdentity(t *testing.T) {
 	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return now }
 	headers := http.Header{"User-Agent": {"claude-cli/2.1.319 (external, cli)"}, "Authorization": {"Bearer secret"}, "Cookie": {"private-cookie"}}
+	s.Observe(http.Header{"User-Agent": {"unknown-private-client"}})
 	s.Observe(headers)
 	first := s.List("claude")[0]
 	now = now.Add(time.Minute)
@@ -44,7 +45,10 @@ func TestStoreDeduplicatesAndPersistsOnlyIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries := s.List("claude")
+	entries, stats := s.Snapshot("claude")
+	if stats != (CaptureStats{Inspected: 3, Unrecognized: 1}) {
+		t.Fatalf("unexpected capture stats after observations and import: %+v", stats)
+	}
 	if len(entries) != 1 || entries[0].Count != 2 || !entries[0].Observed || !entries[0].Imported || !entries[0].FirstSeen.Equal(first.FirstSeen) || !entries[0].LastSeen.Equal(now) {
 		t.Fatalf("unexpected catalog: %#v", entries)
 	}
@@ -60,7 +64,7 @@ func TestStoreDeduplicatesAndPersistsOnlyIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"Authorization", "Cookie", "secret", "private-cookie", "must-be-stripped"} {
+	for _, forbidden := range []string{"Authorization", "Cookie", "secret", "private-cookie", "must-be-stripped", "unknown-private-client"} {
 		if strings.Contains(string(data), forbidden) {
 			t.Fatalf("stored unrelated data: %s", forbidden)
 		}
@@ -73,6 +77,9 @@ func TestStoreDeduplicatesAndPersistsOnlyIdentity(t *testing.T) {
 		t.Fatalf("unsafe file mode: %v", stat.Mode())
 	}
 	loaded := newTestStore(t, path)
+	if _, stats := loaded.Snapshot("gemini"); stats != (CaptureStats{}) {
+		t.Fatalf("restarted capture stats = %+v, want zero", stats)
+	}
 	if got := loaded.List("claude"); len(got) != 1 || got[0].Count != 2 || got[0].ID != first.ID {
 		t.Fatalf("reload: %#v", got)
 	}
@@ -124,6 +131,9 @@ func TestStoreConcurrentObservationAndShutdownFlush(t *testing.T) {
 		})
 	}
 	wg.Wait()
+	if _, stats := s.Snapshot("gemini"); stats != (CaptureStats{Inspected: 360}) {
+		t.Fatalf("unexpected instance-wide capture stats: %+v", stats)
+	}
 	if errClose := s.Close(); errClose != nil {
 		t.Fatal(errClose)
 	}

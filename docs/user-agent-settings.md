@@ -16,14 +16,14 @@ until reconnected.
 
 ## Pick an identity from your clients
 
-1. Connect Claude Code, Codex or Gemini CLI to CPA and send a request using a valid CPA access
-   key. For Gemini CLI in API key mode, set `GOOGLE_GEMINI_BASE_URL` to the CPA base URL
+1. Connect your client to CPA and send a request using a valid CPA access key.
+   For Gemini CLI in API key mode, set `GOOGLE_GEMINI_BASE_URL` to the CPA base URL
    (for example, `http://localhost:8317`) and `GEMINI_API_KEY` to a CPA access key.
    Open **UA control panel**, select the provider, and click **Refresh status** or
    **Refresh list** to load its samples. If an earlier build missed a request, send a
    new one through the updated CPA instance and refresh the list again.
 2. Filter by source or search UA, SDK, Node and platform values. Select a sample.
-   The preview shows every supported header, sample ID, parsed client version,
+   The preview shows every supported header, sample ID, client or SDK version,
    source, first/last recorded times and observed request count. Headers can be
    copied. **Use this UA** fills only the UA field.
    **Use UA and captured fields** also fills the supported fields in that sample.
@@ -54,19 +54,30 @@ values from your own client. For Codex, `User-Agent` and optional
 supported. The list recognizes versioned `claude-cli`, `codex-tui`, `codex_cli_rs`,
 `codex_exec`, `codex_vscode`, `codex`, and `Codex Desktop` identities.
 
-For Gemini CLI, the only header CPA stores is the incoming `User-Agent`. A terminal request can
+Gemini samples store only the incoming `User-Agent`. A terminal request can
 send `GeminiCLI-tui/0.70.0/gemini-2.5-flash (darwin; arm64; terminal)`. Older
 `GeminiCLI/` identities, CLI command, ACP and A2A variants are also recognized.
 In VS Code, the CLI can send `CloudCodeVSCode/` with `proxy_client=geminicli`.
 If Google's auth library appends `google-api-nodejs-client/<version>`, the sample
 keeps that suffix. The catalog displays the CLI version from the start of the UA.
-Clients can declare any of these identities in their request headers.
+
+In Gemini API key mode, Antigravity CLI (`agy` 1.5.15) sent a User-Agent starting
+with `google-genai-sdk/1.79.1 gl-go/`. The Gemini picker displays this sample as
+**Google Gen AI Go SDK** with SDK version `1.79.1`. Other Go applications can send
+the same header. To route `agy` through CPA,
+set `modelProvider` to `gemini` in `~/.gemini/antigravity-cli/settings.json`,
+set `GOOGLE_GEMINI_BASE_URL` to the CPA base URL, and use a CPA access key for
+`GEMINI_API_KEY`. See the [Antigravity authentication guide](https://antigravity.google/docs/install).
 
 CPA observes the incoming headers after client authentication on the `/v1` and `/v1beta`
 model APIs, `/backend-api/codex`, `/v1/realtime`, `/openai/v1/videos` and `/muse-code`,
-including supported account-pool routes and response WebSocket handshakes. A generic
-Google SDK UA alone does not identify Gemini CLI. Selecting a Gemini or Vertex upstream
-does not add a Gemini CLI sample.
+including supported account-pool routes and response WebSocket handshakes. The client
+identity comes from the inbound request. On refresh, the Gemini picker shows how many
+authenticated requests the collector inspected across all providers since startup and
+how many had a missing, invalid or unrecognized identity. Refresh before and after
+sending one request in a quiet period. If both counts increase, the request reached
+the collector with an unrecognized identity. If the inspected count stays the same,
+check the client's base URL and CPA access key and refresh the same server instance.
 The UA catalog never stores credentials, cookies, IPs, or request bodies. It
 deduplicates identical supported header groups and keeps the latest 100 samples
 per provider. **Delete sample** removes the catalog entry, not a saved setting;
@@ -83,9 +94,12 @@ The picker also offers **Auto** and **Default**. Choosing a recorded sample pins
 that exact UA; it does not switch to a newer sample automatically. Updating your
 client and sending another request makes its new identity available in the list.
 
-Credential `headers.User-Agent` takes precedence over the provider default. Header
-names are case insensitive. Existing `$Header-Name` credential mappings continue
-to work. Clearing a provider default does not clear a credential override.
+Credential `headers.User-Agent` takes precedence over the provider default. For a
+plain Claude API key, a fixed Claude Code UA or `auto` keeps request-specific fields
+such as `workload/cron`. An explicit `$Header-Name` mapping uses the complete value
+of that header. A missing or invalid mapping falls back to the provider default or
+the native UA. Header names are case insensitive. Clearing a provider default does
+not clear a credential override.
 
 ## Inspect runtime state and identity rules
 

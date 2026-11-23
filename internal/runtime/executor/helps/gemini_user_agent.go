@@ -3,7 +3,6 @@ package helps
 import (
 	"context"
 	"io"
-	"maps"
 	"net/http"
 	"runtime"
 	"strings"
@@ -21,7 +20,7 @@ func GeminiCredentialUserAgent(auth *cliproxyauth.Auth) string {
 	if auth == nil {
 		return ""
 	}
-	attr := geminiHeaderOverride(auth.Attributes, "header:User-Agent", IsUserAgentAttribute)
+	attr := ConfiguredCredentialUserAgent(auth)
 	if attr != "" && !strings.EqualFold(strings.TrimSpace(auth.Provider), "gemini-cli") {
 		return attr
 	}
@@ -29,40 +28,14 @@ func GeminiCredentialUserAgent(auth *cliproxyauth.Auth) string {
 	var metadata string
 	switch headers := auth.Metadata["headers"].(type) {
 	case map[string]string:
-		metadata = geminiHeaderOverride(headers, "User-Agent", isUserAgent)
+		metadata = userAgentHeaderOverride(headers, "User-Agent", isUserAgent)
 	case map[string]any:
-		metadata = geminiHeaderOverride(headers, "User-Agent", isUserAgent)
+		metadata = userAgentHeaderOverride(headers, "User-Agent", isUserAgent)
 	}
 	if metadata != "" {
 		return metadata
 	}
 	return attr
-}
-
-// Existing credentials can contain multiple spellings of one header. Prefer the
-// canonical key, followed by the lexicographically first valid alternative.
-func geminiHeaderOverride[T any](headers map[string]T, canonical string, matches func(string) bool) string {
-	var bestKey, bestValue string
-	for key, raw := range headers {
-		if !matches(key) {
-			continue
-		}
-		value, ok := any(raw).(string)
-		if !ok || !config.ValidUserAgent(value) {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if key == canonical {
-			return value
-		}
-		if bestKey == "" || key < bestKey {
-			bestKey, bestValue = key, value
-		}
-	}
-	return bestValue
 }
 
 // ResolveGeminiUserAgent returns the configured identity for native Gemini and
@@ -153,15 +126,7 @@ func ApplyGeminiUserAgent(req *http.Request, cfg *config.Config, auth *cliproxya
 // the final resolver. Missing and invalid variables preserve the native default.
 func ApplyGeminiHeaders(req *http.Request, cfg *config.Config, auth *cliproxyauth.Auth, model string, clientHeaders http.Header) {
 	if auth != nil {
-		attrs := auth.Attributes
-		for key := range attrs {
-			if IsUserAgentAttribute(key) {
-				attrs = maps.Clone(attrs)
-				maps.DeleteFunc(attrs, func(key, _ string) bool { return IsUserAgentAttribute(key) })
-				break
-			}
-		}
-		util.ApplyCustomHeadersFromAttrs(req, attrs, clientHeaders)
+		util.ApplyCustomHeadersFromAttrs(req, credentialAttrsWithoutUserAgent(auth.Attributes), clientHeaders)
 	}
 	ApplyGeminiUserAgent(req, cfg, auth, model, clientHeaders)
 }

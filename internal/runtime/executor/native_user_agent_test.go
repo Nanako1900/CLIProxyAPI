@@ -92,6 +92,125 @@ func TestNativeUserAgentReachesWireAfterNativeAndModelRules(t *testing.T) {
 	}
 }
 
+func TestClaudeAPIKeyUserAgentKeepsRequestFields(t *testing.T) {
+	const incoming = "claude-cli/2.1.321 (external, cli, workload/cron)"
+	const fixed = "claude-cli/2.1.353 (external, cli)"
+	const merged = "claude-cli/2.1.353 (external, cli, workload/cron)"
+	const withDollar = "claude-cli/2.1.353 (external, cli, source/$literal)"
+	for _, tc := range []struct {
+		name, shared, key, caller, want string
+		attrName, mapped, cloakMode     string
+		stream, oauth                   bool
+	}{
+		{name: "plain key passthrough", caller: incoming, want: incoming},
+		{name: "shared fixed", shared: fixed, caller: incoming, want: merged},
+		{name: "credential fixed", shared: "operator/1", key: fixed, caller: incoming, want: merged},
+		{name: "shared auto", shared: "auto", caller: incoming, want: incoming},
+		{name: "credential auto", shared: "operator/1", key: "auto", caller: incoming, want: incoming},
+		{name: "credential literal", shared: fixed, key: "operator/1", caller: incoming, want: "operator/1"},
+		{name: "credential mapping", shared: "operator/1", key: "$X-Custom-UA", mapped: fixed, caller: incoming, want: fixed},
+		{name: "case variant mapping", attrName: "HEADER:User-Agent", key: "$X-Custom-UA", mapped: fixed, caller: incoming, want: fixed, stream: true},
+		{name: "missing mapping native fallback", key: "$Missing-UA", caller: incoming, want: incoming},
+		{name: "missing mapping shared fallback", shared: fixed, key: "$Missing-UA", caller: incoming, want: merged},
+		{name: "oversized mapping native fallback", key: "$X-Custom-UA", mapped: strings.Repeat("a", 1025), caller: incoming, want: incoming},
+		{name: "oversized mapping shared fallback", shared: fixed, key: "$X-Custom-UA", mapped: strings.Repeat("a", 1025), caller: incoming, want: merged},
+		{name: "literal dollar", key: withDollar, caller: incoming, want: "claude-cli/2.1.353 (external, cli, source/$literal, workload/cron)"},
+		{name: "credential fixed without caller UA", key: fixed, want: fixed},
+		{name: "OAuth protected profile", key: fixed, caller: incoming, oauth: true, want: fixed},
+		{name: "privacy mode", key: fixed, caller: incoming, cloakMode: "uncloak", want: fixed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seen := make(chan string, 1)
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen <- r.UserAgent()
+				if r.Header.Get("Accept") == "text/event-stream" {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"msg_test","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+			}))
+			defer upstream.Close()
+			attrs := map[string]string{"api_key": "local-test-key", "base_url": upstream.URL, "cloak_mode": tc.cloakMode}
+			if tc.key != "" {
+				name := tc.attrName
+				if name == "" {
+					name = "header:User-Agent"
+				}
+				attrs[name] = tc.key
+			}
+			auth := &cliproxyauth.Auth{ID: t.Name(), Provider: "claude", ProxyURL: "direct", Attributes: attrs}
+			if tc.oauth {
+				attrs["api_key"] = "sk-ant-oat-local-test"
+				auth.Metadata = claudeOAuthTestMetadata()
+			}
+			cfg := &config.Config{ClaudeHeaderDefaults: config.ClaudeHeaderDefaults{UserAgent: tc.shared}}
+			req := coreexecutor.Request{Model: "claude-sonnet-4-6", Payload: []byte(`{"model":"claude-sonnet-4-6","max_tokens":16,"messages":[{"role":"user","content":"test"}]}`)}
+			opts := coreexecutor.Options{SourceFormat: sdktranslator.FormatClaude, OriginalRequest: req.Payload, Headers: make(http.Header)}
+			if tc.mapped != "" {
+				opts.Headers.Set("X-Custom-UA", tc.mapped)
+			}
+			if tc.caller != "" {
+				opts.Headers.Set("User-Agent", tc.caller)
+			}
+			checkUpstreamUA := func(t *testing.T) {
+				t.Helper()
+				select {
+				case got := <-seen:
+					if got != tc.want {
+						t.Errorf("upstream User-Agent = %q, want %q", got, tc.want)
+					}
+				default:
+					t.Fatal("request did not reach the upstream")
+				}
+			}
+			e := NewClaudeExecutor(cfg)
+			t.Run("messages", func(t *testing.T) {
+				if _, err := e.Execute(t.Context(), auth, req, opts); err != nil {
+					t.Fatal(err)
+				}
+				checkUpstreamUA(t)
+			})
+			if tc.stream {
+				t.Run("stream", func(t *testing.T) {
+					streamOpts := opts
+					streamOpts.Stream = true
+					stream, err := e.ExecuteStream(t.Context(), auth, req, streamOpts)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for chunk := range stream.Chunks {
+						if chunk.Err != nil {
+							t.Fatal(chunk.Err)
+						}
+					}
+					checkUpstreamUA(t)
+				})
+			}
+			t.Run("raw", func(t *testing.T) {
+				raw, err := http.NewRequestWithContext(t.Context(), http.MethodGet, upstream.URL, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw.Header = opts.Headers.Clone()
+				ctx := t.Context()
+				if tc.mapped != "" {
+					ctx = newClaudeHeaderTestRequest(t, opts.Headers).Context()
+				}
+				resp, err := e.HttpRequest(ctx, auth, raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := resp.Body.Close(); err != nil {
+					t.Fatal(err)
+				}
+				checkUpstreamUA(t)
+			})
+		})
+	}
+}
+
 func TestNativeUserAgentClaudeOAuthProfileOverride(t *testing.T) {
 	ctx := context.Background()
 	req := httptest.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", nil).WithContext(ctx)

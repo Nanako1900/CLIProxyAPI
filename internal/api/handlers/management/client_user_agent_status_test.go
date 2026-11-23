@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/clientua"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 )
 
@@ -105,5 +106,28 @@ func TestClientUserAgentStatusHandlesUnavailableAndHomeState(t *testing.T) {
 	value := ojson.ParseBytes(response.Body.Bytes())
 	if response.Code != http.StatusOK || !value.Get("homeMode").Bool() || value.Get("catalogAvailable").Bool() || value.Get("overrideInventoryAvailable").Bool() || value.Get("providers.0.auto.enabled").Bool() || value.Get("overrides").Raw != "[]" {
 		t.Fatal("unavailable resources must not be reported as enabled")
+	}
+}
+
+func TestClaudeAPIKeyUserAgentStatusMatchesDuplicateHeaders(t *testing.T) {
+	for _, tc := range []struct{ name, canonical, want string }{
+		{"canonical", "canonical/1", "canonical/1"},
+		{"empty canonical", " ", "first/1"},
+		{"invalid canonical", "bad\nvalue", "first/1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			auth := &coreauth.Auth{Provider: "claude", Attributes: map[string]string{
+				"api_key": "test-key", "header:User-Agent": tc.canonical,
+				"header:USER-AGENT": "first/1", "header:user-agent": "second/1",
+			}}
+			for range 64 {
+				req := httptest.NewRequest(http.MethodGet, "/", nil)
+				helps.ApplyClaudeAPIKeyHeaders(req, nil, auth, nil)
+				provider, reported := credentialUserAgentOverride(auth)
+				if got := req.UserAgent(); got != tc.want || provider != "claude" || reported != tc.want {
+					t.Fatalf("outbound = %q, status = (%q, %q), want Claude UA %q", got, provider, reported, tc.want)
+				}
+			}
+		})
 	}
 }

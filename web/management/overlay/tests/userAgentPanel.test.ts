@@ -14,6 +14,7 @@ import {
 } from '../src/services/api/userAgentPanel';
 import { UserAgentSettings } from '../src/features/userAgents/UserAgentSettings';
 import { UserAgentRules } from '../src/features/userAgents/UserAgentRules';
+import { GeminiCaptureStats } from '../src/features/config/components/blocks/ClientUserAgentPicker';
 import en from '../src/i18n/locales/en.json';
 import zh from '../src/i18n/locales/zh-CN.json';
 import tw from '../src/i18n/locales/zh-TW.json';
@@ -207,6 +208,33 @@ test('rejects stale reads even when the connection switches away and back', asyn
   await expect(loading).rejects.toThrow('connection_changed');
 });
 
+test('Gemini capture diagnostics distinguish zero traffic, unrecognized requests and older servers', async () => {
+  const previous = i18n.language;
+  try {
+    await i18n.changeLanguage('en');
+    const render = (captureStats?: { inspected: number; unrecognized: number }) =>
+      renderToStaticMarkup(createElement(GeminiCaptureStats, { captureStats }));
+    const empty = render({ inspected: 0, unrecognized: 0 });
+    expect(empty).toContain('Requests inspected (0) · Requests with unrecognized User-Agents (0)');
+    expect(empty).toContain('Across all providers since this CPA instance started');
+    expect(empty).toContain('authenticated requests that reached the sampler and exclude imports');
+    const first = render({ inspected: 1, unrecognized: 1 });
+    expect(first).toContain('Requests inspected (1) · Requests with unrecognized User-Agents (1)');
+    const observed = render({ inspected: 8, unrecognized: 5 });
+    expect(observed).toContain('Requests inspected (8) · Requests with unrecognized User-Agents (5)');
+    expect(render()).toContain('Request inspection counts are unavailable.');
+    expect(render()).not.toContain('Requests inspected');
+  } finally {
+    await i18n.changeLanguage(previous);
+  }
+});
+
+test.each([0, 1, 8])('English sample total reads correctly for %i samples', (count) => {
+  expect(i18n.t('ua_panel.sample_total', { lng: 'en', count, limit: 100 })).toBe(
+    `Samples (${count} / 100 per provider)`
+  );
+});
+
 test('all seven locales cover the panel, with disabled controls and complete rule labels', async () => {
   const languages = { en, 'zh-CN': zh, 'zh-TW': tw, ru, vi, ko, tr };
   const previous = i18n.language;
@@ -229,6 +257,8 @@ test('all seven locales cover the panel, with disabled controls and complete rul
       expect(rules).toContain('X-Anthropic-Additional-Protection');
       expect(rules).toContain('metadata.user_id');
       expect(rules).not.toContain('ua_panel.');
+      expect(resource.ua_panel.gemini_catalog_hint).toContain('agy');
+      expect(resource.ua_panel.gemini_catalog_hint).toContain('Google Gen AI Go SDK');
       expect(resource.client_user_agents.gemini_scope).toBeTruthy();
       expect(resource.client_user_agents.gemini_invalid_import).toBeTruthy();
       const geminiDraft = readUserAgentDraft({});
