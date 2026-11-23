@@ -17,9 +17,11 @@ until reconnected.
 ## Pick an identity from your clients
 
 1. Connect Claude Code, Codex or Gemini CLI to CPA and send a request using a valid CPA access
-   key. Open **UA control panel**, select the provider, and click **Refresh list** in
-   its **client UA list**. If an earlier build missed a request, send a new one
-   through the updated CPA instance and refresh the list again.
+   key. For Gemini CLI in API key mode, set `GOOGLE_GEMINI_BASE_URL` to the CPA base URL
+   (for example, `http://localhost:8317`) and `GEMINI_API_KEY` to a CPA access key.
+   Open **UA control panel**, select the provider, and click **Refresh status** or
+   **Refresh list** to load its samples. If an earlier build missed a request, send a
+   new one through the updated CPA instance and refresh the list again.
 2. Filter by source or search UA, SDK, Node and platform values. Select a sample.
    The preview shows every supported header, sample ID, parsed client version,
    source, first/last recorded times and observed request count. Headers can be
@@ -60,8 +62,11 @@ If Google's auth library appends `google-api-nodejs-client/<version>`, the sampl
 keeps that suffix. The catalog displays the CLI version from the start of the UA.
 Clients can declare any of these identities in their request headers.
 
-Authenticated incoming requests under `/v1`, `/v1beta` and `/backend-api/codex` are observed
-before executor header normalization, including response WebSocket handshakes.
+CPA observes the incoming headers after client authentication on the `/v1` and `/v1beta`
+model APIs, `/backend-api/codex`, `/v1/realtime`, `/openai/v1/videos` and `/muse-code`,
+including supported account-pool routes and response WebSocket handshakes. A generic
+Google SDK UA alone does not identify Gemini CLI. Selecting a Gemini or Vertex upstream
+does not add a Gemini CLI sample.
 The UA catalog never stores credentials, cookies, IPs, or request bodies. It
 deduplicates identical supported header groups and keeps the latest 100 samples
 per provider. **Delete sample** removes the catalog entry, not a saved setting;

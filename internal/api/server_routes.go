@@ -1533,9 +1533,10 @@ func (s *Server) setupInferenceRoutes(root gin.IRouter) {
 		s.museCodeHandler.SetModelListHooks(s.loadMuseCodeHomeModels, s.writeModelListResponse)
 	}
 
+	clients := root.Group("", AuthMiddleware(s.accessManager), s.captureClientUserAgent)
+
 	// OpenAI compatible API routes
-	v1 := root.Group("/v1")
-	v1.Use(AuthMiddleware(s.accessManager), s.captureClientUserAgent)
+	v1 := clients.Group("/v1")
 	{
 		v1.GET("/models", s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers))
 		v1.GET("/models/*model", func(c *gin.Context) {
@@ -1568,25 +1569,24 @@ func (s *Server) setupInferenceRoutes(root gin.IRouter) {
 		root.Handle(method, "/v1/tunnel", s.handleWebsocketTunnel)
 	}
 
-	realtimeAuth := realtimeAuthMiddleware(s.accessManager, s.codexLiveHandler)
-	standardAuth := realtimeStandardAuthMiddleware(s.accessManager)
-	root.GET("/v1/realtime", realtimeAuth, s.codexLiveHandler.HandleRealtimeWebsocket)
-	root.POST("/v1/realtime", realtimeAuth, s.codexLiveHandler.Handle)
-	root.POST("/v1/realtime/calls", realtimeAuth, s.codexLiveHandler.Handle)
-	root.GET("/v1/realtime/calls/:call_id", realtimeAuth, s.codexLiveHandler.HandleSideband)
-	root.POST("/v1/realtime/client_secrets", standardAuth, s.codexLiveHandler.CreateClientSecret)
-	root.POST("/v1/realtime/sessions", standardAuth, s.codexLiveHandler.CreateLegacySession)
-	root.POST("/v1/realtime/transcription_sessions", standardAuth, s.codexLiveHandler.HandleTranscriptionSession)
-	root.GET("/v1/realtime/translations", realtimeAuth, s.codexLiveHandler.HandleTranslation)
-	root.POST("/v1/realtime/translations", realtimeAuth, s.codexLiveHandler.HandleTranslation)
-	root.POST("/v1/realtime/translations/client_secrets", standardAuth, s.codexLiveHandler.HandleTranslation)
-	root.POST("/v1/realtime/calls/:call_id/hangup", standardAuth, s.codexLiveHandler.HandleHangup)
-	root.POST("/v1/realtime/calls/:call_id/accept", standardAuth, s.codexLiveHandler.HandleSIPControl)
-	root.POST("/v1/realtime/calls/:call_id/reject", standardAuth, s.codexLiveHandler.HandleSIPControl)
-	root.POST("/v1/realtime/calls/:call_id/refer", standardAuth, s.codexLiveHandler.HandleSIPControl)
+	realtime := root.Group("/v1/realtime", realtimeAuthMiddleware(s.accessManager, s.codexLiveHandler), s.captureClientUserAgent)
+	realtimeStandard := root.Group("/v1/realtime", realtimeStandardAuthMiddleware(s.accessManager), s.captureClientUserAgent)
+	realtime.GET("", s.codexLiveHandler.HandleRealtimeWebsocket)
+	realtime.POST("", s.codexLiveHandler.Handle)
+	realtime.POST("/calls", s.codexLiveHandler.Handle)
+	realtime.GET("/calls/:call_id", s.codexLiveHandler.HandleSideband)
+	realtimeStandard.POST("/client_secrets", s.codexLiveHandler.CreateClientSecret)
+	realtimeStandard.POST("/sessions", s.codexLiveHandler.CreateLegacySession)
+	realtimeStandard.POST("/transcription_sessions", s.codexLiveHandler.HandleTranscriptionSession)
+	realtime.GET("/translations", s.codexLiveHandler.HandleTranslation)
+	realtime.POST("/translations", s.codexLiveHandler.HandleTranslation)
+	realtimeStandard.POST("/translations/client_secrets", s.codexLiveHandler.HandleTranslation)
+	realtimeStandard.POST("/calls/:call_id/hangup", s.codexLiveHandler.HandleHangup)
+	realtimeStandard.POST("/calls/:call_id/accept", s.codexLiveHandler.HandleSIPControl)
+	realtimeStandard.POST("/calls/:call_id/reject", s.codexLiveHandler.HandleSIPControl)
+	realtimeStandard.POST("/calls/:call_id/refer", s.codexLiveHandler.HandleSIPControl)
 
-	openaiV1 := root.Group("/openai/v1")
-	openaiV1.Use(AuthMiddleware(s.accessManager))
+	openaiV1 := clients.Group("/openai/v1")
 	{
 		openaiV1.POST("/videos", openaiHandlers.VideosCreate)
 		openaiV1.GET("/videos/:video_id/content", openaiHandlers.VideosContent)
@@ -1594,8 +1594,7 @@ func (s *Server) setupInferenceRoutes(root gin.IRouter) {
 	}
 
 	// Codex CLI direct route aliases (chatgpt_base_url compatible)
-	codexDirect := root.Group("/backend-api/codex")
-	codexDirect.Use(AuthMiddleware(s.accessManager), s.captureClientUserAgent)
+	codexDirect := clients.Group("/backend-api/codex")
 	{
 		codexDirect.GET("/responses", openaiResponsesHandlers.ResponsesWebsocket)
 		codexDirect.POST("/responses", openaiResponsesHandlers.Responses)
@@ -1604,8 +1603,7 @@ func (s *Server) setupInferenceRoutes(root gin.IRouter) {
 	}
 
 	// Muse Code CLI direct endpoints (beside /v1)
-	museCode := root.Group("/muse-code")
-	museCode.Use(AuthMiddleware(s.accessManager))
+	museCode := clients.Group("/muse-code")
 	{
 		museCode.GET("/models", s.museCodeHandler.HandleModels)
 		museCode.GET("/config", s.museCodeHandler.Handle)
@@ -1614,8 +1612,7 @@ func (s *Server) setupInferenceRoutes(root gin.IRouter) {
 	}
 
 	// Gemini compatible API routes
-	v1beta := root.Group("/v1beta")
-	v1beta.Use(AuthMiddleware(s.accessManager), s.captureClientUserAgent)
+	v1beta := clients.Group("/v1beta")
 	{
 		v1beta.GET("/models", s.geminiModelsHandler(geminiHandlers))
 		v1beta.POST("/interactions", geminiHandlers.Interactions)

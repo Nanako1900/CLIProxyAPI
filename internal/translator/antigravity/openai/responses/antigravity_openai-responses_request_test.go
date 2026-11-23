@@ -782,18 +782,25 @@ func TestConvertOpenAIResponsesRequestToAntigravity_InterruptedMessageBeforeReal
 		t.Fatalf("ValidateGeminiFunctionCallPairing failed on Antigravity interrupted message before real output request: %v; output=%s", errPair, out)
 	}
 
-	// The user message precedes the completed tool response turn
-	stopText := ojson.GetBytesNoCopy(out, "request.contents.2.parts.0.text").String()
-	if stopText != "Stop, do something else instead." {
-		t.Fatalf("unexpected text in request.contents[2]: %q", stopText)
+	contents := ojson.GetBytesNoCopy(out, "request.contents").Array()
+	if len(contents) != 4 || contents[1].Get("parts.0.functionCall.id").String() != "c1" || contents[1].Get("parts.1.functionCall.id").String() != "c2" {
+		t.Fatalf("unexpected parallel call order: %s", rawRequest)
 	}
-	c1Resp := ojson.GetBytesNoCopy(out, "request.contents.3.parts.0.functionResponse")
+	// Antigravity groups both responses immediately after the calls, before the interruption.
+	responses := contents[2].Get("parts").Array()
+	if contents[2].Get("role").String() != "user" || len(responses) != 2 {
+		t.Fatalf("unexpected tool response turn: %s", contents[2].Raw)
+	}
+	c1Resp := responses[0].Get("functionResponse")
 	if c1Resp.Get("id").String() != "c1" || c1Resp.Get("name").String() != "shell" || c1Resp.Get("response.result").String() != "call interrupted, no output" {
 		t.Fatalf("unexpected synthesized response for c1: %s", c1Resp.Raw)
 	}
-	c2Resp := ojson.GetBytesNoCopy(out, "request.contents.3.parts.1.functionResponse")
+	c2Resp := responses[1].Get("functionResponse")
 	if c2Resp.Get("id").String() != "c2" || c2Resp.Get("name").String() != "shell" || c2Resp.Get("response.result").String() != "/tmp\n" {
 		t.Fatalf("unexpected real response for c2: %s", c2Resp.Raw)
+	}
+	if contents[3].Get("role").String() != "user" || contents[3].Get("parts.0.text").String() != "Stop, do something else instead." {
+		t.Fatalf("unexpected interruption after the responses: %s", contents[3].Raw)
 	}
 }
 

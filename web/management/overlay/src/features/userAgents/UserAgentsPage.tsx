@@ -44,6 +44,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
   const [notice, setNotice] = useState('');
   const [review, setReview] = useState(false);
   const [loadedAt, setLoadedAt] = useState('');
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const alive = useRef(false);
   const errorElement = useRef<HTMLDivElement>(null);
   const generation = useRef(0);
@@ -116,15 +117,18 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
   }, [load]);
 
   const refresh = () => {
+    const reload = () => {
+      if (!alive.current) return;
+      setCatalogRevision((revision) => revision + 1);
+      void load();
+    };
     if (dirty)
       confirm({
         title: t('ua_panel.discard'),
         message: t('ua_panel.discard_hint'),
-        onConfirm: () => {
-          if (alive.current) void load();
-        },
+        onConfirm: reload,
       });
-    else void load();
+    else reload();
   };
   const save = async () => {
     if (!snapshot || !draft || disabled) return;
@@ -391,7 +395,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
             <p className={styles.muted}>{t('ua_panel.catalog_unavailable')}</p>
           ) : (
             <ClientUserAgentPicker
-              key={provider}
+              key={`${provider}:${catalogRevision}`}
               provider={provider}
               limit={runtime?.catalogLimit}
               disabled={disabled}

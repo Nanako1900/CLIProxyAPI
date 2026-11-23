@@ -387,7 +387,7 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 			for i := range lines {
 				spaced := ensureColonSpacedJSON(lines[i])
 				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: spaced}:
+				case out <- helps.TranslatedClaudeStreamChunk(responseFormat, spaced, streamErr):
 					if len(spaced) > 0 {
 						zeroOutputGuard.MarkEmitted()
 					}
@@ -480,7 +480,7 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 			commitReplay()
 			for _, line := range lines {
 				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: ensureColonSpacedJSON(line)}:
+				case out <- helps.TranslatedClaudeStreamChunk(responseFormat, ensureColonSpacedJSON(line), streamErr):
 				case <-ctx.Done():
 					return
 				}
@@ -589,7 +589,7 @@ func (e *AIStudioExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth
 				commitReplay()
 				for i := range lines {
 					select {
-					case out <- cliproxyexecutor.StreamChunk{Payload: ensureColonSpacedJSON(lines[i])}:
+					case out <- helps.TranslatedClaudeStreamChunk(responseFormat, ensureColonSpacedJSON(lines[i]), streamErr):
 					case <-ctx.Done():
 						return false
 					}
