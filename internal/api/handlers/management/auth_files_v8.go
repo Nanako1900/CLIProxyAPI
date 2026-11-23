@@ -119,7 +119,7 @@ func validateOAuthSessionProxyURL(raw string) (string, error) {
 
 func builtinOAuthRequiresSOCKS(provider string) bool {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "claude", "codex", "antigravity", "kimi", "kimi-ai", "xai", "devin", "meta":
+	case "claude", "codex", "antigravity", "kimi", "kimi-ai", "xai", "devin", "copilot", "meta":
 		return true
 	default:
 		return false
@@ -475,6 +475,8 @@ func (h *Handler) StartOAuthV8(c *gin.Context) {
 		h.RequestXAIToken(c)
 	case "devin":
 		h.RequestDevinToken(c)
+	case "copilot":
+		h.requestCopilotToken(c)
 	case "meta":
 		h.RequestMetaToken(c)
 	default:

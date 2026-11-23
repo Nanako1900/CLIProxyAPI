@@ -32,6 +32,10 @@ func (s *Server) captureClientUserAgent(c *gin.Context) {
 	if c.IsAborted() || s.clientUserAgents == nil {
 		return
 	}
+	// Open-access mode admits requests without establishing a client identity.
+	if _, authenticated := c.Get("accessProvider"); !authenticated {
+		return
+	}
 	if cfg := s.getConfig(); cfg == nil || cfg.Home.Enabled {
 		return
 	}

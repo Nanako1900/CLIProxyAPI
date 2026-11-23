@@ -96,6 +96,7 @@ describe('OAuth account proxy policy', () => {
       'kimi-ai',
       'xai',
       'devin',
+      'copilot',
       'meta',
       'Muse',
     ]) {
@@ -163,6 +164,7 @@ describe('OAuth account proxy policy', () => {
         'kimi-ai',
         'xai',
         'devin',
+        'copilot',
         'meta',
         'custom-plugin',
       ]) {

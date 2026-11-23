@@ -58,12 +58,62 @@ func TestClientUserAgentCaptureAfterAuthentication(t *testing.T) {
 	// Simulate executor normalization after the capture middleware.
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Set("accessProvider", "test")
 	c.Request.Header.Set("User-Agent", "claude-cli/2.1.318")
 	s.captureClientUserAgent(c)
 	c.Request.Header.Set("User-Agent", "claude-cli/0.0.1")
 	if got := s.clientUserAgents.List("claude")[0].Headers["User-Agent"]; got != "claude-cli/2.1.318" {
 		t.Fatalf("captured rewritten UA: %s", got)
 	}
+}
+
+func TestGeminiCaptureOnAuthenticatedRouteGroups(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "test-management-key")
+	const ua = "GeminiCLI-tui/0.70.0/gemini-2.5-flash (darwin; arm64; terminal)"
+	request := func(s *Server, method, path, key string, status int, count uint64) string {
+		t.Helper()
+		req := httptest.NewRequest(method, path, nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		if key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
+		req.Header.Set("User-Agent", ua)
+		resp := httptest.NewRecorder()
+		s.engine.ServeHTTP(resp, req)
+		if resp.Code != status {
+			t.Fatalf("%s %s status = %d, want %d", method, path, resp.Code, status)
+		}
+		var observed uint64
+		entries := s.clientUserAgents.List("gemini")
+		if len(entries) == 1 {
+			observed = entries[0].Count
+		}
+		if len(entries) > 1 || observed != count {
+			t.Errorf("%s %s: want %d observations, got %+v", method, path, count, entries)
+		}
+		return resp.Body.String()
+	}
+	s := newTestServer(t)
+	pooled := newTestServerWithConfig(t, testServerPoolConfig())
+	for _, server := range []*Server{s, pooled} {
+		t.Cleanup(func() {
+			if err := server.clientUserAgents.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	request(s, http.MethodGet, "/healthz", "test-key", http.StatusOK, 0)
+	request(s, http.MethodGet, "/v8/management/client-user-agents?provider=gemini", "test-management-key", http.StatusOK, 0)
+	request(s, http.MethodGet, "/muse-code/models", "invalid", http.StatusUnauthorized, 0)
+	request(s, http.MethodGet, "/muse-code/models", "test-key", http.StatusOK, 1)
+	secret := request(s, http.MethodPost, "/v1/realtime/client_secrets", "test-key", http.StatusOK, 2)
+	request(s, http.MethodGet, "/v1/realtime", ojson.Get(secret, "value").String(), http.StatusUpgradeRequired, 3)
+	// The video handler rejects the empty request body after authentication.
+	request(s, http.MethodPost, "/openai/v1/videos", "test-key", http.StatusBadRequest, 4)
+	s.accessManager.SetProviders(nil)
+	request(s, http.MethodGet, "/muse-code/models", "", http.StatusOK, 4)
+	request(pooled, http.MethodGet, "/pools/premium/v1beta/models", "pool-client-key", http.StatusForbidden, 0)
+	request(pooled, http.MethodGet, "/pools/basic/v1beta/models", "pool-client-key", http.StatusOK, 1)
 }
 
 func TestGeminiCLIStreamObservedInUserAgentCatalog(t *testing.T) {
@@ -204,6 +254,7 @@ func TestClientUserAgentManagementContract(t *testing.T) {
 	request(http.MethodGet, endpoint, "", key, http.StatusNotFound)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set("accessProvider", "test")
 	c.Request.Header.Set("User-Agent", "claude-cli/3.0.0")
 	s.captureClientUserAgent(c)
 	if len(s.clientUserAgents.List("claude")) != 0 {
