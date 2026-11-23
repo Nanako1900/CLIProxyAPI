@@ -17,9 +17,9 @@ until reconnected.
 ## Pick an identity from your clients
 
 1. Connect Claude Code, Codex or Gemini CLI to CPA and send a request using a valid CPA access
-   key. Open **UA control panel** and refresh the
-   corresponding **client UA list**. Collection starts after this version is
-   deployed; historical logs are not imported.
+   key. Open **UA control panel**, select the provider, and click **Refresh list** in
+   its **client UA list**. If an earlier build missed a request, send a new one
+   through the updated CPA instance and refresh the list again.
 2. Filter by source or search UA, SDK, Node and platform values. Select a sample.
    The preview shows every supported header, sample ID, parsed client version,
    source, first/last recorded times and observed request count. Headers can be
@@ -49,10 +49,16 @@ X-Stainless-Timeout: 600
 This is an illustrative sample, not a certified version bundle. Use the exact
 values from your own client. For Codex, `User-Agent` and optional
 `X-Codex-Beta-Features` are supported. For Claude, the six headers shown above are
-supported. A Gemini CLI sample stores its `User-Agent` only.
-The list recognizes versioned `GeminiCLI`, `claude-cli`, `codex-tui`, `codex_cli_rs`,
-`codex_exec`, `codex_vscode`, `codex`, and `Codex Desktop` identities. Headers are
-client-declared and can be spoofed; CPA does not certify the installed software.
+supported. The list recognizes versioned `claude-cli`, `codex-tui`, `codex_cli_rs`,
+`codex_exec`, `codex_vscode`, `codex`, and `Codex Desktop` identities.
+
+For Gemini CLI, the only header CPA stores is the incoming `User-Agent`. A terminal request can
+send `GeminiCLI-tui/0.70.0/gemini-2.5-flash (darwin; arm64; terminal)`. Older
+`GeminiCLI/` identities, CLI command, ACP and A2A variants are also recognized.
+In VS Code, the CLI can send `CloudCodeVSCode/` with `proxy_client=geminicli`.
+If Google's auth library appends `google-api-nodejs-client/<version>`, the sample
+keeps that suffix. The catalog displays the CLI version from the start of the UA.
+Clients can declare any of these identities in their request headers.
 
 Authenticated incoming requests under `/v1`, `/v1beta` and `/backend-api/codex` are observed
 before executor header normalization, including response WebSocket handshakes.

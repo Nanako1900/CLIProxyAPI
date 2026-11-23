@@ -41,6 +41,50 @@ func TestGeminiCLIProfileContainsOnlyUserAgent(t *testing.T) {
 	}
 }
 
+func TestGeminiCLISurfaceUserAgents(t *testing.T) {
+	const terminal = "/0.70.0/gemini-3.5-flash (darwin; arm64; terminal)"
+	const vscode = "CloudCodeVSCode/0.70.0 (aidev_client; os_type=Linux; os_version=6.8.0; arch=x64; host_path=VSCode/1.112.0 > CloudShell/2; proxy_client=geminicli)"
+	const authSDK = " google-api-nodejs-client/10.9.0"
+	const nestedSurface = "GeminiCLI-tui/0.70.0/gemini-2.5-flash (linux; x64; Corporate (EU))"
+	for _, ua := range []string{
+		"GeminiCLI-tui" + terminal, "GeminiCLI-tui" + terminal + authSDK,
+		"GeminiCLI-cli-command" + terminal, "GeminiCLI-acp" + terminal,
+		"GeminiCLI-acp-zed" + terminal, "GeminiCLI-acp-jetbrains" + terminal,
+		"GeminiCLI-a2a-server" + terminal, "GeminiCLI" + terminal + authSDK,
+		vscode, vscode + authSDK, nestedSurface, nestedSurface + authSDK,
+		"GeminiCLI-acp-future-ide" + terminal,
+		"GeminiCLI/0.70.0/models/my model (high) (linux; arm64; Corporate (EU (West)))",
+	} {
+		profile, err := FromHeaders(http.Header{"User-Agent": {ua}, "Authorization": {"Bearer secret"}, "X-Goog-Api-Client": {"gl-node/22"}})
+		if err != nil || profile.Provider != "gemini" || profile.Version != "0.70.0" || len(profile.Headers) != 1 || profile.Headers["User-Agent"] != ua {
+			t.Errorf("UA %q: profile = %#v, error = %v", ua, profile, err)
+		}
+	}
+}
+
+func TestGeminiCLIRejectsUnrelatedIdentities(t *testing.T) {
+	for _, ua := range []string{
+		"google-api-nodejs-client/10.9.0", "google-genai-sdk/1.0.0 gl-node/v22.0.0",
+		"GeminiCLI-tui-extra/0.70.0/model (linux; x64; terminal)",
+		"GeminiCLI-acpx-zed/0.70.0/model (linux; x64; terminal)",
+		"GeminiCLI-acp-/0.70.0/model (linux; x64; terminal)",
+		"GeminiCLI-tui/0.70.0/model (linux; x64; Corporate (EU)))",
+		"GeminiCLI-tui/latest/model", "GeminiCLI-tui/0.70.0/ (linux; x64; terminal)",
+		"GeminiCLI-tui/0.70.0/model (linux; x64; terminal) unrelated/1.0.0",
+		"CloudCodeVSCode/latest (aidev_client; proxy_client=geminicli)",
+		"CloudCodeVSCode/0.70.0 (aidev_client; host_path=VSCode/1.112.0)",
+		"CloudCodeVSCode/0.70.0 (aidev_client; proxy_client=geminicli-extra)",
+		"CloudCodeVSCode/0.70.0 (aidev_client; other_proxy_client=geminicli)",
+		"CloudCodeVSCode/0.70.0 (aidev_client) (proxy_client=geminicli)",
+		"CloudCodeVSCode/0.70.0 (aidev_client) other/1.0.0 (proxy_client=geminicli)",
+		"Other/0.70.0 (aidev_client; proxy_client=geminicli)",
+	} {
+		if _, err := FromHeaders(http.Header{"User-Agent": {ua}}); err == nil {
+			t.Errorf("accepted %q", ua)
+		}
+	}
+}
+
 func TestRecognizedClientFamilies(t *testing.T) {
 	for _, family := range []string{"claude-cli", "codex-tui", "codex_cli_rs", "codex_exec", "codex_vscode", "codex", "Codex Desktop"} {
 		t.Run(family, func(t *testing.T) {

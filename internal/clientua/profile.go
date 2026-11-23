@@ -7,17 +7,23 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/MoeForge/moego/regexp"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 )
 
 const MaxImportBytes = 32 << 10
 
+const geminiVersion = `[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?`
+
+const geminiProduct = `GeminiCLI(?:-(?:tui|cli-command|a2a-server|acp(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?))?`
+const googleAuthSuffix = `(?: google-api-nodejs-client/` + geminiVersion + `)?`
+
 var userAgentPattern = regexp.MustCompile(`^(claude-cli|codex-tui|codex_cli_rs|codex_exec|codex_vscode|codex|Codex Desktop)/([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)(?:[ (].*)?$`)
-var geminiUserAgentPattern = regexp.MustCompile(`^GeminiCLI/([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)/(?:[^ ]+|[^ ].* \([^()]*\))$`)
+var geminiUserAgentPattern = regexp.MustCompile(`^` + geminiProduct + `/(` + geminiVersion + `)/([^ ].*?)` + googleAuthSuffix + `$`)
+var geminiVSCodeUserAgentPattern = regexp.MustCompile(`^CloudCodeVSCode/(` + geminiVersion + `) \(aidev_client(?:;[^();]*)*; *proxy_client=geminicli(?:;[^();]*)*\)` + googleAuthSuffix + `$`)
 var softwareVersionPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
 
 var claudeHeaders = []string{"User-Agent", "X-Stainless-Package-Version", "X-Stainless-Runtime-Version", "X-Stainless-Os", "X-Stainless-Arch", "X-Stainless-Timeout"}
@@ -57,14 +63,49 @@ func headerValue(headers http.Header, name string) (string, error) {
 	return value, nil
 }
 
+// The final comment can contain nested parentheses from GEMINI_CLI_SURFACE.
+// Read it backwards so spaces and parentheses in the model name stay intact.
+func validGeminiModelAndEnvironment(value string) bool {
+	if !strings.Contains(value, " ") {
+		return true
+	}
+	if !strings.HasSuffix(value, ")") {
+		return false
+	}
+	depth := 0
+	for i := len(value) - 1; i > 0; i-- {
+		switch value[i] {
+		case ')':
+			depth++
+		case '(':
+			depth--
+			if depth == 0 {
+				return value[i-1] == ' '
+			}
+		}
+	}
+	return false
+}
+
+func geminiUserAgentVersion(ua string) string {
+	if strings.HasPrefix(ua, "CloudCodeVSCode/") {
+		if match := geminiVSCodeUserAgentPattern.FindStringSubmatch(ua); match != nil {
+			return match[1]
+		}
+	} else if match := geminiUserAgentPattern.FindStringSubmatch(ua); match != nil && validGeminiModelAndEnvironment(match[2]) {
+		return match[1]
+	}
+	return ""
+}
+
 // FromHeaders recognizes a declared client identity without claiming authenticity.
 func FromHeaders(headers http.Header) (Profile, error) {
 	ua, errHeader := headerValue(headers, "User-Agent")
 	if errHeader != nil {
 		return Profile{}, errHeader
 	}
-	if match := geminiUserAgentPattern.FindStringSubmatch(ua); match != nil {
-		return Profile{Provider: "gemini", Version: match[1], Headers: map[string]string{"User-Agent": ua}}, nil
+	if version := geminiUserAgentVersion(ua); version != "" {
+		return Profile{Provider: "gemini", Version: version, Headers: map[string]string{"User-Agent": ua}}, nil
 	}
 	match := userAgentPattern.FindStringSubmatch(ua)
 	if len(match) != 3 {
