@@ -753,12 +753,8 @@ func (e *ClaudeExecutor) PrepareRequest(req *http.Request, auth *cliproxyauth.Au
 		req.Header.Del("Authorization")
 		req.Header.Del("x-api-key")
 	}
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(req, attrs)
-	helps.ApplyConfiguredUserAgent(req.Context(), req.Header, e.cfg, auth, "claude", nil)
+	policy, _ := resolveClaudeWirePolicy(e.cfg, auth, apiKey, false)
+	applyClaudeCredentialHeaders(req, e.cfg, auth, useAPIKey, policy, nil)
 	return nil
 }
 
