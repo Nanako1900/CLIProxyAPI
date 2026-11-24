@@ -54,6 +54,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
   const disabled = !connected || loading || saving;
   const runtime = snapshot?.runtime;
   const gemini = provider === 'gemini';
+  const ualabOnly = gemini || provider === 'codex';
   const defaultUserAgent = t(gemini ? 'ua_panel.gemini_channel_default' : 'ua_panel.unset');
   const status = runtime?.providers.find((item) => item.provider === provider);
   const overrides = runtime?.overrides.filter((item) => item.provider === provider) || [];
@@ -255,10 +256,10 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
         </p>
       )}
       {runtime?.homeMode && <p className={styles.note}>{t('ua_panel.home_mode')}</p>}
-      {snapshot && !gemini && !runtime && (
+      {snapshot && !ualabOnly && !runtime && (
         <p className={styles.note}>{t('ua_panel.runtime_unavailable')}</p>
       )}
-      {status && !gemini && (
+      {status && !ualabOnly && (
         <>
           <div className={styles.stats}>
             {[
@@ -387,7 +388,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
           }}
         />
       )}
-      {snapshot && !gemini && (
+      {snapshot && !ualabOnly && (
         <Card title={t('ua_panel.samples')}>
           {runtime?.catalogAvailable === false ? (
             <p className={styles.muted}>{t('ua_panel.catalog_unavailable')}</p>
@@ -403,7 +404,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
           <p className={styles.muted}>{t('ua_panel.catalog_hint')}</p>
         </Card>
       )}
-      {runtime && !gemini && (
+      {runtime && !ualabOnly && (
         <Card
           title={t('ua_panel.credential_overrides')}
           extra={<Link to="/auth-files">{t('ua_panel.open_credentials')}</Link>}
@@ -432,7 +433,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
           </div>
         </Card>
       )}
-      {!gemini && <UserAgentRules provider={provider} />}
+      {!ualabOnly && <UserAgentRules provider={provider} />}
       {draft && (
         <div className={styles.saveBar}>
           <span>

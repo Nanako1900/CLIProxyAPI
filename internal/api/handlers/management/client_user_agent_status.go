@@ -81,13 +81,13 @@ func credentialUserAgentOverride(auth *coreauth.Auth) (provider, value string) {
 		if auth.AuthKind() == coreauth.AuthKindAPIKey {
 			return "claude", helps.ConfiguredCredentialUserAgent(auth)
 		}
-		fallthrough
-	case "codex":
 		for key, raw := range auth.Attributes {
 			if strings.EqualFold(key, "header:User-Agent") && strings.TrimSpace(raw) != "" {
 				return auth.Provider, raw
 			}
 		}
+	case "codex":
+		return "codex", helps.CodexCredentialUserAgent(auth)
 	}
 	return "", ""
 }

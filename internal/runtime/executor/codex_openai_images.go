@@ -127,7 +127,7 @@ func (e *CodexExecutor) executeOpenAIImage(ctx context.Context, auth *cliproxyau
 	prepareHeaders(httpReq)
 	recordCodexOpenAIImageRequest(ctx, e.cfg, e.Identifier(), auth, url, httpReq.Header.Clone(), body)
 
-	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := helps.NewCodexHTTPClient(ctx, e.cfg, auth, 0)
 	httpClient = reporter.TrackHTTPClient(httpClient)
 	httpResp, errDo := doCodexRequest(httpClient, httpReq, body, prepareHeaders, nil)
 	if errDo != nil {
@@ -238,7 +238,7 @@ func (e *CodexExecutor) executeOpenAIImageStream(ctx context.Context, auth *clip
 	prepareHeaders(httpReq)
 	recordCodexOpenAIImageRequest(ctx, e.cfg, e.Identifier(), auth, url, httpReq.Header.Clone(), body)
 
-	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := helps.NewCodexHTTPClient(ctx, e.cfg, auth, 0)
 	httpClient = reporter.TrackHTTPClient(httpClient)
 	httpResp, errDo := doCodexRequest(httpClient, httpReq, body, prepareHeaders, nil)
 	if errDo != nil {
@@ -388,7 +388,7 @@ func (e *CodexExecutor) executeDirectOpenAIImage(ctx context.Context, auth *clip
 	prepareHeaders(httpReq)
 	recordCodexOpenAIImageRequest(ctx, e.cfg, e.Identifier(), auth, url, httpReq.Header.Clone(), body)
 
-	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := helps.NewCodexHTTPClient(ctx, e.cfg, auth, 0)
 	httpClient = reporter.TrackHTTPClient(httpClient)
 	httpResp, errDo := doCodexRequest(httpClient, httpReq, body, prepareHeaders, nil)
 	if errDo != nil {
@@ -462,7 +462,7 @@ func (e *CodexExecutor) executeDirectOpenAIImageStream(ctx context.Context, auth
 	prepareHeaders(httpReq)
 	recordCodexOpenAIImageRequest(ctx, e.cfg, e.Identifier(), auth, url, httpReq.Header.Clone(), body)
 
-	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := helps.NewCodexHTTPClient(ctx, e.cfg, auth, 0)
 	httpClient = reporter.TrackHTTPClient(httpClient)
 	httpResp, errDo := doCodexRequest(httpClient, httpReq, body, prepareHeaders, nil)
 	if errDo != nil {

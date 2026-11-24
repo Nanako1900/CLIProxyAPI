@@ -19,12 +19,12 @@ func TestConfiguredUserAgentPrecedenceAndScope(t *testing.T) {
 	for _, tc := range []struct {
 		name, provider, apiKey, override, want string
 	}{
-		{"codex OAuth", "codex", "", "", "configured-codex/1.0"},
-		{"codex API key scope", "codex", "secret", "", "native"},
-		{"codex credential", "codex", "secret", "credential/2.0", "credential/2.0"},
+		{"codex OAuth uses UALab", "codex", "", "", "configured-codex/1.0"},
+		{"codex API key uses UALab", "codex", "secret", "", "configured-codex/1.0"},
+		{"codex ignores legacy credential override", "codex", "secret", "credential/2.0", "configured-codex/1.0"},
 		{"claude shared", "claude", "secret", "", "configured-claude/1.0"},
 		{"claude credential", "claude", "secret", "credential/2.0", "credential/2.0"},
-		{"mapped credential", "codex", "secret", "$X-Test-Identity", "mapped/3.0"},
+		{"mapped claude credential", "claude", "secret", "$X-Test-Identity", "mapped/3.0"},
 		{"missing mapped credential", "claude", "secret", "$Missing", "configured-claude/1.0"},
 		{"invalid credential", "claude", "secret", "bad\r\nInjected: yes", "configured-claude/1.0"},
 		{"other provider", "gemini", "", "", "native"},
@@ -82,11 +82,9 @@ func TestConfiguredClaudeUserAgentKeepsClientRequestFields(t *testing.T) {
 
 func TestAutomaticUserAgentPreservesIdentityAndNeverDowngrades(t *testing.T) {
 	for _, tc := range []struct{ provider, baseline, version, want string }{
-		{"codex", "codex-tui/0.154.0 (Linux; aarch64) terminal/2 (codex-tui; 0.154.0)", "0.167.0", "codex-tui/0.167.0 (Linux; aarch64) terminal/2 (codex-tui; 0.167.0)"},
 		{"claude", "claude-cli/2.1.280 (external, claude-vscode)", "2.1.319", "claude-cli/2.1.319 (external, claude-vscode)"},
 		{"claude", "claude-cli/3.0.0 (external, cli)", "2.1.319", "claude-cli/3.0.0 (external, cli)"},
-		{"codex", "auto", "0.154.0", DefaultCodexUserAgent},
-		{"codex", "codex-tui/0.154.0-beta", "0.154.0", DefaultCodexUserAgent},
+		{"codex", "auto", "0.154.0", ""},
 	} {
 		if got := replaceClientUserAgentVersion(tc.provider, tc.baseline, tc.version); got != tc.want {
 			t.Fatalf("version replacement = %q, want %q", got, tc.want)
@@ -114,33 +112,29 @@ func (f userAgentRegistryTransport) RoundTrip(req *http.Request) (*http.Response
 }
 
 func TestUserAgentRegistryFailureIsolationAndOptIn(t *testing.T) {
-	cache := &clientVersionCache{versions: map[string]string{"codex": "0.154.0", "claude": "2.1.280"}}
+	cache := &clientVersionCache{versions: map[string]string{"claude": "2.1.280"}}
 	var calls atomic.Int32
 	client := &http.Client{Transport: userAgentRegistryTransport(func(req *http.Request) (*http.Response, error) {
 		calls.Add(1)
 		if req.URL.Host != "registry.npmjs.org" || req.Header.Get("Authorization") != "" || req.Header.Get("Cookie") != "" {
 			t.Error("lookup destination or credential isolation failed")
 		}
-		status, body := http.StatusOK, `{"version":"0.167.0"}`
-		if strings.Contains(req.URL.Path, "anthropic") {
-			status, body = http.StatusServiceUnavailable, "unavailable"
-		}
-		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"version":"2.1.319"}`)), Header: make(http.Header)}, nil
 	})}
 	refreshClientUserAgents(context.Background(), clientUserAgentSettings{}, client, cache)
 	if calls.Load() != 0 {
 		t.Fatal("disabled auto mode made a network request")
 	}
-	refreshClientUserAgents(context.Background(), clientUserAgentSettings{Codex: true, Claude: true}, client, cache)
-	if cache.get("codex") != "0.167.0" || cache.get("claude") != "2.1.280" || calls.Load() != 2 {
-		t.Fatal("failed lookup overwrote cache or blocked the other provider")
+	refreshClientUserAgents(context.Background(), clientUserAgentSettings{Claude: true}, client, cache)
+	if cache.get("claude") != "2.1.319" || calls.Load() != 1 {
+		t.Fatal("Claude lookup did not update cached version")
 	}
-	if cache.advance("codex", "0.100.0") || cache.advance("claude", "2.2.0-beta") {
+	if cache.advance("claude", "2.1.100") || cache.advance("claude", "2.2.0-beta") {
 		t.Fatal("cache accepted downgrade or prerelease")
 	}
 	client.Transport = userAgentRegistryTransport(func(*http.Request) (*http.Response, error) { return nil, fmt.Errorf("offline") })
-	refreshClientUserAgents(context.Background(), clientUserAgentSettings{Codex: true}, client, cache)
-	if cache.get("codex") != "0.167.0" {
+	refreshClientUserAgents(context.Background(), clientUserAgentSettings{Claude: true}, client, cache)
+	if cache.get("claude") != "2.1.319" {
 		t.Fatal("offline refresh discarded cached version")
 	}
 }
@@ -148,11 +142,11 @@ func TestUserAgentRegistryFailureIsolationAndOptIn(t *testing.T) {
 func TestUserAgentUpdaterReadsNativeSettings(t *testing.T) {
 	cfg := &config.Config{ClaudeHeaderDefaults: config.ClaudeHeaderDefaults{UserAgent: " AUTO "}, CodexKey: []config.CodexKey{{Headers: map[string]string{"user-agent": "auto"}}}}
 	settings := userAgentSettings(cfg)
-	if !settings.Claude || !settings.Codex {
-		t.Fatal("native auto settings were not recognized")
+	if !settings.Claude {
+		t.Fatal("native Claude auto setting was not recognized")
 	}
 	cfg.Home.Enabled = true
-	if settings = userAgentSettings(cfg); settings.Claude || settings.Codex {
+	if settings = userAgentSettings(cfg); settings.Claude {
 		t.Fatal("Home must not start standalone auto lookups")
 	}
 }
@@ -177,18 +171,20 @@ func TestUserAgentUpdaterConfigChangeCancelsLookupAndShutdown(t *testing.T) {
 			<-ctx.Done()
 		})
 	}()
-	// Starting disabled and an unrelated save must not contact the registry.
+	// Starting disabled, Codex auto, and unrelated saves must not contact the registry.
+	updates <- struct{}{}
+	current.Store(&config.Config{CodexHeaderDefaults: config.CodexHeaderDefaults{UserAgent: "auto"}})
 	updates <- struct{}{}
 	select {
 	case <-started:
-		t.Fatal("disabled updater started a lookup")
+		t.Fatal("disabled or Codex-only updater started a lookup")
 	default:
 	}
-	current.Store(&config.Config{CodexHeaderDefaults: config.CodexHeaderDefaults{UserAgent: "auto"}})
+	current.Store(&config.Config{ClaudeHeaderDefaults: config.ClaudeHeaderDefaults{UserAgent: "auto"}})
 	updates <- struct{}{}
 	first := <-started
-	if !first.settings.Codex || first.settings.Claude {
-		t.Fatal("incorrect provider enabled by config reload")
+	if !first.settings.Claude {
+		t.Fatal("Claude auto not enabled by config reload")
 	}
 	updates <- struct{}{}
 	ticks <- time.Time{}
@@ -197,12 +193,12 @@ func TestUserAgentUpdaterConfigChangeCancelsLookupAndShutdown(t *testing.T) {
 		t.Fatal("unrelated save or timer overlapped an active lookup")
 	default:
 	}
-	current.Store(&config.Config{ClaudeHeaderDefaults: config.ClaudeHeaderDefaults{UserAgent: "auto"}})
+	current.Store(&config.Config{ClaudeHeaderDefaults: config.ClaudeHeaderDefaults{UserAgent: "auto"}, SDKConfig: config.SDKConfig{ProxyURL: "http://127.0.0.1:8080"}})
 	updates <- struct{}{}
 	second := <-started
 	<-first.ctx.Done()
-	if !second.settings.Claude || second.settings.Codex {
-		t.Fatal("obsolete provider settings survived config reload")
+	if !second.settings.Claude || second.settings.ProxyURL != "http://127.0.0.1:8080" {
+		t.Fatal("updated proxy setting not applied on config reload")
 	}
 	cancel()
 	<-stopped
@@ -232,11 +228,12 @@ func TestGeminiUserAgentUALabOnlyNoAutoOrCredentialOverride(t *testing.T) {
 		t.Fatalf("expected auto to resolve empty for Gemini, got %q", got)
 	}
 
-	// Verify auto updater never triggers for Gemini credentials
+	// Verify auto updater never triggers for Gemini or Codex credentials
 	settings := userAgentSettings(&config.Config{
 		GeminiKey: []config.GeminiKey{{Headers: map[string]string{"User-Agent": "auto"}}},
+		CodexKey:  []config.CodexKey{{Headers: map[string]string{"User-Agent": "auto"}}},
 	})
-	if settings.Claude || settings.Codex {
+	if settings.Claude {
 		t.Fatalf("unexpected updater settings: %+v", settings)
 	}
 }

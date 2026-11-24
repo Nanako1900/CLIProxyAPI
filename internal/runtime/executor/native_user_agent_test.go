@@ -25,9 +25,14 @@ func TestNativeUserAgentReachesWireAfterNativeAndModelRules(t *testing.T) {
 				_, _ = w.Write([]byte(`{"error":{"message":"identity probe"}}`))
 			}))
 			defer server.Close()
-			cfg := &config.Config{}
+			cfg := &config.Config{
+				CodexHeaderDefaults: config.CodexHeaderDefaults{
+					UserAgent:  "codex-updated/9.9.9",
+					Originator: "codex-tui",
+				},
+			}
 			ctx := context.Background()
-			auth := &cliproxyauth.Auth{ID: "identity-test", Provider: "codex", ProxyURL: "direct", Attributes: map[string]string{"api_key": "identity-test-key", "base_url": server.URL, "header:User-Agent": "codex-updated/9.9.9"}}
+			auth := &cliproxyauth.Auth{ID: "identity-test", Provider: "codex", ProxyURL: "direct", Attributes: map[string]string{"api_key": "identity-test-key", "base_url": server.URL}}
 			req := coreexecutor.Request{Model: "gpt-5.6-luna", Payload: []byte(`{"model":"gpt-5.6-luna","input":"hello"}`)}
 			opts := coreexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse, Headers: http.Header{"User-Agent": {"client-old"}}}
 			var errCall error
@@ -224,23 +229,28 @@ func TestNativeUserAgentClaudeOAuthProfileOverride(t *testing.T) {
 }
 
 func TestNativeUserAgentSDKPrepareResolvesAuto(t *testing.T) {
-	for _, provider := range []string{"claude", "codex"} {
-		t.Run(provider, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "https://example.com/identity", nil)
-			auth := &cliproxyauth.Auth{Provider: provider, Attributes: map[string]string{"api_key": "local-test", "header:User-Agent": "auto"}}
-			var errPrepare error
-			if provider == "codex" {
-				errPrepare = NewCodexExecutor(&config.Config{}).PrepareRequest(req, auth)
-			} else {
-				errPrepare = NewClaudeExecutor(&config.Config{}).PrepareRequest(req, auth)
-			}
-			if errPrepare != nil {
-				t.Fatal(errPrepare)
-			}
-			if ua := req.Header.Get("User-Agent"); !strings.HasPrefix(ua, provider+"-") || ua == "auto" {
-				t.Fatalf("SDK request identity was not resolved: %q", ua)
-			}
-		})
+	// Claude still resolves "auto" on credential overrides.
+	claudeReq := httptest.NewRequest(http.MethodPost, "https://example.com/identity", nil)
+	claudeAuth := &cliproxyauth.Auth{Provider: "claude", Attributes: map[string]string{"api_key": "local-test", "header:User-Agent": "auto"}}
+	if errPrepare := NewClaudeExecutor(&config.Config{}).PrepareRequest(claudeReq, claudeAuth); errPrepare != nil {
+		t.Fatal(errPrepare)
+	}
+	if ua := claudeReq.Header.Get("User-Agent"); !strings.HasPrefix(ua, "claude-") || ua == "auto" {
+		t.Fatalf("Claude SDK request identity was not resolved: %q", ua)
+	}
+
+	// Codex ignores legacy credential "auto" and applies only the pasted UALab profile.
+	codexReq := httptest.NewRequest(http.MethodPost, "https://example.com/identity", nil)
+	codexAuth := &cliproxyauth.Auth{Provider: "codex", Attributes: map[string]string{"api_key": "local-test", "header:User-Agent": "auto"}}
+	codexCfg := &config.Config{CodexHeaderDefaults: config.CodexHeaderDefaults{UserAgent: "codex-tui/0.172.0", Originator: "codex-tui"}}
+	if errPrepare := NewCodexExecutor(codexCfg).PrepareRequest(codexReq, codexAuth); errPrepare != nil {
+		t.Fatal(errPrepare)
+	}
+	if ua := codexReq.Header.Get("User-Agent"); ua != "codex-tui/0.172.0" {
+		t.Fatalf("Codex SDK request User-Agent = %q, want codex-tui/0.172.0", ua)
+	}
+	if orig := codexReq.Header.Get("Originator"); orig != "codex-tui" {
+		t.Fatalf("Codex SDK request Originator = %q, want codex-tui", orig)
 	}
 }
 
@@ -254,7 +264,7 @@ func TestNativeUserAgentCodexOAuthDefaults(t *testing.T) {
 					w.WriteHeader(http.StatusTeapot)
 				}))
 				defer server.Close()
-				cfg := &config.Config{CodexHeaderDefaults: config.CodexHeaderDefaults{UserAgent: value}}
+				cfg := &config.Config{CodexHeaderDefaults: config.CodexHeaderDefaults{UserAgent: value, Originator: "codex-tui"}}
 				auth := &cliproxyauth.Auth{
 					ID: "native-ua-oauth", Provider: "codex", ProxyURL: "direct",
 					Attributes: map[string]string{"base_url": server.URL},
@@ -272,8 +282,8 @@ func TestNativeUserAgentCodexOAuthDefaults(t *testing.T) {
 				case got := <-headers:
 					ua := got.Get("User-Agent")
 					if value == "auto" {
-						if !strings.HasPrefix(ua, "codex-tui/") {
-							t.Fatalf("auto did not resolve to a client identity: %q", ua)
+						if ua == "auto" {
+							t.Fatalf("Codex auto must not be sent literally: %q", ua)
 						}
 					} else if ua != value {
 						t.Fatalf("OAuth default = %q, want %q", ua, value)

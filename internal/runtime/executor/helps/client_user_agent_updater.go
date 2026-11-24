@@ -17,7 +17,6 @@ import (
 const clientUserAgentRefreshInterval = 3 * time.Hour
 
 type clientUserAgentSettings struct {
-	Codex    bool
 	Claude   bool
 	ProxyURL string
 }
@@ -28,7 +27,6 @@ func userAgentSettings(cfg *config.Config) clientUserAgentSettings {
 		return settings
 	}
 	settings.ProxyURL = cfg.ProxyURL
-	settings.Codex = strings.EqualFold(strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent), "auto")
 	settings.Claude = strings.EqualFold(strings.TrimSpace(cfg.ClaudeHeaderDefaults.UserAgent), "auto")
 	hasAutoHeader := func(headers map[string]string) bool {
 		for name, value := range headers {
@@ -37,9 +35,6 @@ func userAgentSettings(cfg *config.Config) clientUserAgentSettings {
 			}
 		}
 		return false
-	}
-	for _, key := range cfg.CodexKey {
-		settings.Codex = settings.Codex || hasAutoHeader(key.Headers)
 	}
 	for _, key := range cfg.ClaudeKey {
 		settings.Claude = settings.Claude || hasAutoHeader(key.Headers)
@@ -79,7 +74,7 @@ func runClientUserAgentUpdater(ctx context.Context, getConfig func() *config.Con
 		}
 		completed = nil
 		previous = settings
-		if !settings.Codex && !settings.Claude {
+		if !settings.Claude {
 			return
 		}
 		lookupCtx, cancelLookup := context.WithCancel(ctx)
@@ -110,7 +105,7 @@ func runClientUserAgentUpdater(ctx context.Context, getConfig func() *config.Con
 
 func refreshClientUserAgents(ctx context.Context, settings clientUserAgentSettings, client *http.Client, cache *clientVersionCache) {
 	var pending sync.WaitGroup
-	for provider, enabled := range map[string]bool{"codex": settings.Codex, "claude": settings.Claude} {
+	for provider, enabled := range map[string]bool{"claude": settings.Claude} {
 		if !enabled {
 			continue
 		}
@@ -179,8 +174,6 @@ func fetchClientUserAgentVersion(ctx context.Context, client *http.Client, provi
 
 func clientUserAgentRegistryURL(provider string) string {
 	switch provider {
-	case "codex":
-		return "https://registry.npmjs.org/@openai/codex/latest"
 	case "claude":
 		return "https://registry.npmjs.org/@anthropic-ai/claude-code/latest"
 	}
