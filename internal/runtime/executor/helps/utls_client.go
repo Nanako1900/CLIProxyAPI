@@ -58,10 +58,11 @@ func (b *closeConnectionBody) Close() error {
 
 func newUtlsRoundTripper(proxyURL string) *utlsRoundTripper {
 	var dialer proxy.Dialer = proxy.Direct
-	if proxyURL != "" {
-		proxyDialer, mode, errBuild := proxyutil.BuildDialer(proxyURL)
+	if trimmed := strings.TrimSpace(proxyURL); trimmed != "" {
+		proxyDialer, mode, errBuild := proxyutil.BuildDialer(trimmed)
 		if errBuild != nil {
-			log.Errorf("utls: failed to configure proxy dialer for %q: %v", proxyutil.Redact(proxyURL), errBuild)
+			log.Errorf("utls: failed to configure proxy dialer for %q: %v", proxyutil.Redact(trimmed), errBuild)
+			dialer = &failingProxyDialer{err: fmt.Errorf("utls: invalid proxy %q: %w", proxyutil.Redact(trimmed), errBuild)}
 		} else if mode != proxyutil.ModeInherit && proxyDialer != nil {
 			dialer = proxyDialer
 		}
@@ -336,15 +337,36 @@ func newClaudeCodeRoundTripper(proxyURL string) http.RoundTripper {
 // both keep the same proxy semantics.
 func claudeCodeDialer(proxyURL string) proxy.Dialer {
 	var dialer proxy.Dialer = proxy.Direct
-	if proxyURL != "" {
-		proxyDialer, mode, errBuild := proxyutil.BuildDialer(proxyURL)
+	if trimmed := strings.TrimSpace(proxyURL); trimmed != "" {
+		proxyDialer, mode, errBuild := proxyutil.BuildDialer(trimmed)
 		if errBuild != nil {
-			log.Errorf("claude tls: failed to configure proxy dialer for %q: %v", proxyutil.Redact(proxyURL), errBuild)
+			log.Errorf("claude tls: failed to configure proxy dialer for %q: %v", proxyutil.Redact(trimmed), errBuild)
+			return &failingProxyDialer{err: fmt.Errorf("claude tls: invalid proxy %q: %w", proxyutil.Redact(trimmed), errBuild)}
 		} else if mode != proxyutil.ModeInherit && proxyDialer != nil {
 			dialer = proxyDialer
 		}
 	}
 	return dialer
+}
+
+var claudeAPICallTransportCache = internalcache.NewBoundedLRU[string, http.RoundTripper](
+	claudeCodeRoundTripperCacheCapacity,
+	func(_ string, rt http.RoundTripper) {
+		if tr, ok := rt.(interface{ CloseIdleConnections() }); ok {
+			tr.CloseIdleConnections()
+		}
+	},
+)
+
+// NewClaudeAPICallTransport returns a Claude Code uTLS HTTP/1.1 transport for
+// management APICall requests targeting Anthropic (e.g. /api/oauth/usage,
+// /api/oauth/profile, /api/organizations/*/reset_rate_limits), strictly obeying
+// proxyURL with no environment-proxy fallback and fail-closed error handling.
+func NewClaudeAPICallTransport(proxyURL string) http.RoundTripper {
+	key := strings.TrimSpace(proxyURL)
+	return claudeAPICallTransportCache.GetOrAdd(key, func() http.RoundTripper {
+		return newClaudeCodeRoundTripperForDialer(strictAPICallDialerForProxy(key))
+	})
 }
 
 // pooledClaudeCodeTransport returns the credential-scoped Claude Code uTLS transport

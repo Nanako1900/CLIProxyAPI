@@ -222,3 +222,112 @@ func (d *codexPipeDialer) DialContext(_ context.Context, _, _ string) (net.Conn,
 	go d.onServerConn(server)
 	return client, nil
 }
+
+func TestAPICallTransportsFailClosedOnInvalidProxyAndIgnoreEnvProxy(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	accepted := make(chan struct{}, 4)
+	go func() {
+		for {
+			conn, errAccept := ln.Accept()
+			if errAccept != nil {
+				return
+			}
+			accepted <- struct{}{}
+			_ = conn.Close()
+		}
+	}()
+
+	// Verify strictAPICallDialerForProxy ignores process HTTP_PROXY/HTTPS_PROXY
+	// when no proxy is configured, and fails closed when an invalid proxy is given.
+	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+
+	badProxy := "invalid-scheme://127.0.0.1:9999"
+	cfg := &config.Config{
+		CodexHeaderDefaults: config.CodexHeaderDefaults{
+			UserAgent:   "codex-tui/0.172.0 (Mac OS 27.3.0; arm64) Apple_Terminal/489.11 (codex-tui; 0.172.0)",
+			HeaderOrder: []string{"user-agent", "host"},
+		},
+		GeminiHeaderDefaults: config.GeminiHeaderDefaults{
+			UserAgent:   "GeminiCLI/0.37.2",
+			ForceHTTP1:  true,
+			HeaderOrder: []string{"User-Agent", "Host"},
+		},
+	}
+
+	transports := []struct {
+		name string
+		rt   http.RoundTripper
+	}{
+		{name: "codex", rt: NewCodexAPICallTransport(cfg, badProxy)},
+		{name: "claude", rt: NewClaudeAPICallTransport(badProxy)},
+		{name: "gemini", rt: NewGeminiAPICallTransport(cfg, badProxy)},
+	}
+	for _, tc := range transports {
+		req, errReq := http.NewRequest(http.MethodGet, "https://"+ln.Addr().String()+"/probe", nil)
+		if errReq != nil {
+			t.Fatalf("%s: new request: %v", tc.name, errReq)
+		}
+		resp, errDo := tc.rt.RoundTrip(req)
+		if errDo == nil {
+			_ = resp.Body.Close()
+			t.Fatalf("%s: expected invalid proxy to fail closed, got nil error", tc.name)
+		}
+	}
+
+	select {
+	case <-accepted:
+		t.Fatal("listener received direct TCP connection after invalid proxy configuration (IP leak)")
+	default:
+	}
+
+	// Verify strictAPICallDialerForProxy("") connects directly to local listener
+	// despite HTTP_PROXY/HTTPS_PROXY pointing to dead port 1.
+	directDialer := strictAPICallDialerForProxy("")
+	conn, errDirect := directDialer.Dial("tcp", ln.Addr().String())
+	if errDirect != nil {
+		t.Fatalf("expected direct dialer to ignore env proxy, got error: %v", errDirect)
+	}
+	_ = conn.Close()
+}
+
+func TestResolveClaudeEffectiveUserAgent(t *testing.T) {
+	t.Parallel()
+
+	// 1. Fixed config UA wins over default baseline.
+	fixedCfg := &config.Config{
+		ClaudeHeaderDefaults: config.ClaudeHeaderDefaults{
+			UserAgent: "claude-cli/2.1.331 (external, sdk-cli)",
+		},
+	}
+	if got := ResolveClaudeEffectiveUserAgent(fixedCfg, nil); got != "claude-cli/2.1.331 (external, sdk-cli)" {
+		t.Fatalf("fixed UA = %q, want claude-cli/2.1.331 (external, sdk-cli)", got)
+	}
+
+	// 2. Credential static UA override wins over global fixed config UA.
+	authWithOverride := &cliproxyauth.Auth{
+		Provider: "claude",
+		Attributes: map[string]string{
+			"header:User-Agent": "claude-cli/2.1.999 (external, cli)",
+		},
+	}
+	if got := ResolveClaudeEffectiveUserAgent(fixedCfg, authWithOverride); got != "claude-cli/2.1.999 (external, cli)" {
+		t.Fatalf("credential override UA = %q, want claude-cli/2.1.999 (external, cli)", got)
+	}
+
+	// 3. "auto" never returns literal "auto"; resolves to an actual Claude CLI UA.
+	autoCfg := &config.Config{
+		ClaudeHeaderDefaults: config.ClaudeHeaderDefaults{
+			UserAgent: "auto",
+		},
+	}
+	gotAuto := ResolveClaudeEffectiveUserAgent(autoCfg, nil)
+	if gotAuto == "" || strings.EqualFold(gotAuto, "auto") {
+		t.Fatalf("auto UA = %q, want resolved Claude CLI UA", gotAuto)
+	}
+}

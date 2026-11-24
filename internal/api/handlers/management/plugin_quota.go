@@ -13,6 +13,7 @@ import (
 	"github.com/MoeForge/moego/ojson"
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
@@ -443,8 +444,16 @@ func (h *Handler) executeQuotaProbe(c *gin.Context, auth *coreauth.Auth, probe m
 		}
 	}
 
+	provider := detectAPICallProvider(req.URL, auth)
+	applyAPICallProviderHeaders(req, provider, h.cfg, auth)
+
+	resolvedProxy, errProxy := h.resolveAPICallProxyURL(auth, "")
+	if errProxy != nil {
+		return pluginapi.QuotaFetchResponse{}, true, fmt.Errorf("probe proxy configuration invalid: %w", errProxy)
+	}
+
 	client := &http.Client{
-		Transport: h.apiCallTransport(auth, ""),
+		Transport: h.apiCallProviderTransport(req.URL, provider, resolvedProxy),
 	}
 
 	resp, errDo := client.Do(req)
@@ -457,7 +466,24 @@ func (h *Handler) executeQuotaProbe(c *gin.Context, auth *coreauth.Auth, probe m
 		}
 	}()
 
-	respBytes, errRead := io.ReadAll(resp.Body)
+	var (
+		respBytes []byte
+		errRead   error
+	)
+	if strings.TrimSpace(resp.Header.Get("Content-Encoding")) != "" {
+		decodedReader, errDecode := helps.DecodeResponseBody(resp.Body, resp.Header)
+		if errDecode != nil {
+			return pluginapi.QuotaFetchResponse{}, true, fmt.Errorf("decode probe response: %w", errDecode)
+		}
+		defer func() {
+			if errClose := decodedReader.Close(); errClose != nil {
+				log.Errorf("probe decoded response body close error: %v", errClose)
+			}
+		}()
+		respBytes, errRead = io.ReadAll(decodedReader)
+	} else {
+		respBytes, errRead = io.ReadAll(resp.Body)
+	}
 	if errRead != nil {
 		return pluginapi.QuotaFetchResponse{}, true, fmt.Errorf("read probe response: %w", errRead)
 	}

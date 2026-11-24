@@ -1,6 +1,8 @@
 package management
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -17,8 +19,10 @@ import (
 
 	"github.com/MoeForge/moego/json"
 	"github.com/gin-gonic/gin"
+	"github.com/klauspost/compress/zstd"
 	xaiauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/xai"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v8/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -1488,5 +1492,269 @@ func TestAPICallRejectsWhenOnlyIDTokenPresentWithoutRefreshToken(t *testing.T) {
 	}
 	if upstreamHit.Load() {
 		t.Fatal("upstream must not be hit when access token cannot be resolved")
+	}
+}
+
+func TestAPICallEnforcesConfiguredCodexUAAndDecodesCompressedResponse(t *testing.T) {
+	t.Parallel()
+
+	const customCodexUA = "codex-tui/0.172.0 (Mac OS 27.3.0; arm64) Apple_Terminal/489.11 (codex-tui; 0.172.0)"
+
+	for _, encoding := range []string{"gzip", "zstd"} {
+		encoding := encoding
+		t.Run(encoding, func(t *testing.T) {
+			t.Parallel()
+
+			var gotUA, gotOriginator, gotBeta, gotAcceptEncoding string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotUA = r.Header.Get("User-Agent")
+				gotOriginator = r.Header.Get("Originator")
+				gotBeta = r.Header.Get("X-Codex-Beta-Features")
+				gotAcceptEncoding = r.Header.Get("Accept-Encoding")
+
+				payload := []byte(`{"plan_type":"plus","rate_limit":{"allowed":true}}`)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Encoding", encoding)
+				w.WriteHeader(http.StatusOK)
+
+				var buf bytes.Buffer
+				if encoding == "gzip" {
+					gz := gzip.NewWriter(&buf)
+					_, _ = gz.Write(payload)
+					_ = gz.Close()
+				} else {
+					enc, _ := zstd.NewWriter(&buf)
+					_, _ = enc.Write(payload)
+					_ = enc.Close()
+				}
+				_, _ = w.Write(buf.Bytes())
+			}))
+			defer upstream.Close()
+
+			manager := coreauth.NewManager(nil, nil, nil)
+			codexAuth := &coreauth.Auth{
+				ID:       "codex-user@example.com.json",
+				Provider: "codex",
+				Metadata: map[string]any{
+					"type":         "codex",
+					"access_token": "codex-access-token",
+				},
+			}
+			if _, errReg := manager.Register(context.Background(), codexAuth); errReg != nil {
+				t.Fatalf("register codex auth: %v", errReg)
+			}
+			authIndex := codexAuth.EnsureIndex()
+
+			h := &Handler{
+				cfg: &config.Config{
+					CodexHeaderDefaults: config.CodexHeaderDefaults{
+						UserAgent:      customCodexUA,
+						Originator:     "codex_tui",
+						BetaFeatures:   "js_repl,apps",
+						AcceptEncoding: "zstd,gzip",
+					},
+				},
+				authManager: manager,
+			}
+
+			router := gin.New()
+			router.POST("/", h.APICall)
+
+			// Simulate stale frontend UA ("codex-tui/0.149.1") and wrong Originator ("codex_cli_rs").
+			reqBody := `{"authIndex":"` + authIndex + `","method":"GET","url":"` + upstream.URL + `/backend-api/wham/usage","header":{"Authorization":"Bearer $TOKEN$","User-Agent":"codex-tui/0.149.1 (Mac OS 15.0; arm64)","Originator":"codex_cli_rs"}}`
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(reqBody))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body = %s", recorder.Code, recorder.Body.String())
+			}
+			if gotUA != customCodexUA {
+				t.Fatalf("upstream User-Agent = %q, want %q", gotUA, customCodexUA)
+			}
+			if gotOriginator != "codex_tui" {
+				t.Fatalf("upstream Originator = %q, want codex_tui", gotOriginator)
+			}
+			if gotBeta != "js_repl,apps" {
+				t.Fatalf("upstream X-Codex-Beta-Features = %q, want js_repl,apps", gotBeta)
+			}
+			if gotAcceptEncoding != "zstd,gzip" {
+				t.Fatalf("upstream Accept-Encoding = %q, want zstd,gzip", gotAcceptEncoding)
+			}
+
+			var apiResp apiCallResponse
+			if errUnmarshal := json.Unmarshal(recorder.Body.Bytes(), &apiResp); errUnmarshal != nil {
+				t.Fatalf("unmarshal apiCallResponse: %v", errUnmarshal)
+			}
+			if apiResp.StatusCode != http.StatusOK {
+				t.Fatalf("apiResp.StatusCode = %d, want 200", apiResp.StatusCode)
+			}
+			if !strings.Contains(apiResp.Body, `"plan_type":"plus"`) {
+				t.Fatalf("expected decoded JSON body, got %q", apiResp.Body)
+			}
+			if ce := http.Header(apiResp.Header).Get("Content-Encoding"); ce != "" {
+				t.Fatalf("expected Content-Encoding to be stripped after decode, got %q", ce)
+			}
+		})
+	}
+}
+
+func TestAPICallEnforcesConfiguredClaudeGeminiAntigravityUA(t *testing.T) {
+	t.Parallel()
+
+	const customClaudeUA = "claude-cli/2.1.331 (external, sdk-cli)"
+	const customGeminiUA = "GeminiCLI/0.37.2/gemini-2.5-pro (darwin; arm64)"
+
+	cases := []struct {
+		name     string
+		provider string
+		sentUA   string
+		wantUA   string
+	}{
+		{
+			name:     "claude_overrides_stale_frontend_ua",
+			provider: "claude",
+			sentUA:   "claude-cli/2.1.280 (external, cli)",
+			wantUA:   customClaudeUA,
+		},
+		{
+			name:     "gemini_applies_configured_ua",
+			provider: "gemini",
+			sentUA:   "",
+			wantUA:   customGeminiUA,
+		},
+		{
+			name:     "antigravity_upgrades_stale_hub_ua",
+			provider: "antigravity",
+			sentUA:   "antigravity/hub/2.23.0",
+			wantUA:   misc.AntigravityUserAgent(),
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var gotUA string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotUA = r.Header.Get("User-Agent")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer upstream.Close()
+
+			manager := coreauth.NewManager(nil, nil, nil)
+			auth := &coreauth.Auth{
+				ID:       tc.provider + "@example.com.json",
+				Provider: tc.provider,
+				Metadata: map[string]any{
+					"access_token": "tok-123",
+				},
+			}
+			if _, errReg := manager.Register(context.Background(), auth); errReg != nil {
+				t.Fatalf("register auth: %v", errReg)
+			}
+			authIndex := auth.EnsureIndex()
+
+			h := &Handler{
+				cfg: &config.Config{
+					ClaudeHeaderDefaults: config.ClaudeHeaderDefaults{
+						UserAgent: customClaudeUA,
+					},
+					GeminiHeaderDefaults: config.GeminiHeaderDefaults{
+						UserAgent: customGeminiUA,
+					},
+				},
+				authManager: manager,
+			}
+
+			router := gin.New()
+			router.POST("/", h.APICall)
+
+			headers := map[string]string{}
+			if tc.sentUA != "" {
+				headers["User-Agent"] = tc.sentUA
+			}
+			payloadBytes, _ := json.Marshal(map[string]any{
+				"authIndex": authIndex,
+				"method":    "GET",
+				"url":       upstream.URL + "/quota",
+				"header":    headers,
+			})
+
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payloadBytes))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body = %s", recorder.Code, recorder.Body.String())
+			}
+			if gotUA != tc.wantUA {
+				t.Fatalf("upstream User-Agent = %q, want %q", gotUA, tc.wantUA)
+			}
+		})
+	}
+}
+
+func TestAPICallInvalidProxyFailsClosedWithoutDirectLeak(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name            string
+		cfgProxy        string
+		requestProxyURL string
+	}{
+		{
+			name:            "invalid_request_proxy",
+			cfgProxy:        "http://127.0.0.1:8080",
+			requestProxyURL: "bad-scheme://127.0.0.1:9999",
+		},
+		{
+			name:            "invalid_global_proxy_no_fallback",
+			cfgProxy:        "bad-scheme://127.0.0.1:9999",
+			requestProxyURL: "",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var upstreamHit atomic.Bool
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				upstreamHit.Store(true)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer upstream.Close()
+
+			h := &Handler{
+				cfg: &config.Config{
+					SDKConfig: sdkconfig.SDKConfig{ProxyURL: tc.cfgProxy},
+				},
+			}
+			router := gin.New()
+			router.POST("/", h.APICall)
+
+			payloadBytes, _ := json.Marshal(map[string]any{
+				"method":   "GET",
+				"url":      upstream.URL + "/probe",
+				"proxyUrl": tc.requestProxyURL,
+			})
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payloadBytes))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, req)
+
+			if recorder.Code != http.StatusBadGateway {
+				t.Fatalf("status = %d, want 502; body = %s", recorder.Code, recorder.Body.String())
+			}
+			if upstreamHit.Load() {
+				t.Fatal("upstream was contacted directly after invalid proxy configuration (IP leak)")
+			}
+		})
 	}
 }

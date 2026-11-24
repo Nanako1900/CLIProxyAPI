@@ -282,3 +282,34 @@ func captureClaudeOAuthClientHello(t *testing.T) []byte {
 	}
 	return append(header, payload...)
 }
+
+func TestClaudeOAuthUtlsRoundTripperInvalidProxyFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	accepted := make(chan struct{}, 1)
+	go func() {
+		conn, errAccept := ln.Accept()
+		if errAccept == nil {
+			accepted <- struct{}{}
+			_ = conn.Close()
+		}
+	}()
+
+	rt := newUtlsRoundTripper(&sdkconfig.SDKConfig{ProxyURL: "invalid-scheme://127.0.0.1:9999"})
+	conn, errDial := rt.dialer.Dial("tcp", ln.Addr().String())
+	if errDial == nil {
+		_ = conn.Close()
+		t.Fatal("expected invalid proxy URL to fail closed, got nil error")
+	}
+	select {
+	case <-accepted:
+		t.Fatal("listener received direct TCP connection after invalid proxy configuration (IP leak)")
+	default:
+	}
+}
