@@ -1476,15 +1476,24 @@ func (a *executorAdapter) buildExecutorRequest(ctx context.Context, auth *coreau
 }
 
 // The Gemini CLI plugin applies metadata headers after attributes. Remove all
-// spellings of the raw setting from the request copies before adding its value.
+// legacy User-Agent / X-Goog-Api-Client spellings from the request copies and
+// apply strictly what was pasted into upstream.gemini.header-defaults via UALab.
 func (a *executorAdapter) applyGeminiCLIUserAgent(ctx context.Context, auth *coreauth.Auth, model string, headers http.Header, attrs map[string]string, metadata map[string]any) map[string]string {
-	value := helps.ResolveGeminiUserAgent(ctx, a.host.currentRuntimeConfig(), auth, model, headers)
-	maps.DeleteFunc(attrs, func(key, _ string) bool { return helps.IsUserAgentAttribute(key) })
+	cfg := a.host.currentRuntimeConfig()
+	value := helps.ResolveGeminiUserAgent(ctx, cfg, auth, model, headers)
+	maps.DeleteFunc(attrs, func(key, _ string) bool {
+		prefix, name, ok := strings.Cut(key, ":")
+		if !ok || !strings.EqualFold(prefix, "header") {
+			return false
+		}
+		name = strings.TrimSpace(name)
+		return strings.EqualFold(name, "User-Agent") || strings.EqualFold(name, "X-Goog-Api-Client")
+	})
 	switch custom := metadata["headers"].(type) {
 	case map[string]string:
-		metadata["headers"] = withoutPluginUserAgent(custom)
+		metadata["headers"] = withoutPluginGeminiIdentity(custom)
 	case map[string]any:
-		metadata["headers"] = withoutPluginUserAgent(custom)
+		metadata["headers"] = withoutPluginGeminiIdentity(custom)
 	}
 	if value != "" {
 		if attrs == nil {
@@ -1492,12 +1501,34 @@ func (a *executorAdapter) applyGeminiCLIUserAgent(ctx context.Context, auth *cor
 		}
 		attrs["header:User-Agent"] = value
 	}
+	if cfg != nil {
+		if apiClient := strings.TrimSpace(cfg.GeminiHeaderDefaults.APIClient); apiClient != "" && !strings.EqualFold(apiClient, "auto") {
+			if attrs == nil {
+				attrs = make(map[string]string)
+			}
+			attrs["header:X-Goog-Api-Client"] = apiClient
+		}
+		for k, v := range cfg.GeminiHeaderDefaults.ExtraHeaders {
+			k = strings.TrimSpace(k)
+			v = strings.TrimSpace(v)
+			if k == "" || v == "" {
+				continue
+			}
+			if attrs == nil {
+				attrs = make(map[string]string)
+			}
+			attrs["header:"+k] = v
+		}
+	}
 	return attrs
 }
 
-func withoutPluginUserAgent[T any](headers map[string]T) map[string]T {
+func withoutPluginGeminiIdentity[T any](headers map[string]T) map[string]T {
 	clone := maps.Clone(headers)
-	maps.DeleteFunc(clone, func(key string, _ T) bool { return strings.EqualFold(strings.TrimSpace(key), "User-Agent") })
+	maps.DeleteFunc(clone, func(key string, _ T) bool {
+		name := strings.TrimSpace(key)
+		return strings.EqualFold(name, "User-Agent") || strings.EqualFold(name, "X-Goog-Api-Client")
+	})
 	return clone
 }
 

@@ -55,30 +55,13 @@ func TestClientUserAgentStatusExposesOnlyIdentityOverrides(t *testing.T) {
 		t.Fatal("missing runtime or catalog metadata")
 	}
 	overrides := value.Get("overrides").Array()
-	wantValues := map[string]bool{"cli-file": false, "api": false, "interactions": false, "vertex": false}
+	// Gemini uses the pasted UALab profile rather than per-credential UA overrides.
 	for _, row := range overrides {
 		if row.Get("provider").String() == "gemini" {
-			ua := row.Get("userAgent").String()
-			wantValues[ua] = true
-			switch ua {
-			case "cli-file", "vertex":
-				index := row.Get("authIndex").String()
-				if index == "" || row.Get("name").String() != index || row.Get("source").String() != "credential" {
-					t.Errorf("file-backed %s override should display its credential index", ua)
-				}
-			case "api":
-				if row.Get("name").String() != "gemini-apikey" || row.Get("source").String() != "config" {
-					t.Error("missing config credential label")
-				}
-			}
+			t.Errorf("unexpected Gemini credential override exposed: %s", row.Raw)
 		}
 	}
-	for ua, seen := range wantValues {
-		if !seen {
-			t.Errorf("missing Gemini override %q", ua)
-		}
-	}
-	if len(overrides) != 5 || overrides[0].Get("userAgent").String() != "$X-Client-UA" || overrides[0].Get("authIndex").String() == "" || !overrides[0].Get("disabled").Bool() {
+	if len(overrides) != 1 || overrides[0].Get("userAgent").String() != "$X-Client-UA" || overrides[0].Get("authIndex").String() == "" || !overrides[0].Get("disabled").Bool() {
 		t.Fatal("incorrect override inventory")
 	}
 	for _, secret := range []string{"private-key", "private-token", "private-access-token", "private-account", "private-file-name", "not-listed", "operator@example.test", "private-gcp-project", "/credentials/", "private-vertex-service-account", "private-gemini-auth", "private-vertex-auth"} {

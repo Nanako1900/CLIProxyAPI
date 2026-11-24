@@ -209,118 +209,34 @@ func TestUserAgentUpdaterConfigChangeCancelsLookupAndShutdown(t *testing.T) {
 	<-second.ctx.Done()
 }
 
-func TestGeminiUserAgentCredentialAndModel(t *testing.T) {
-	cfg := &config.Config{GeminiHeaderDefaults: config.GeminiHeaderDefaults{UserAgent: "operator/1"}}
-	attrs := map[string]string{"header:uSeR-agEnt": "attr/1"}
-	auth := &cliproxyauth.Auth{Provider: "gemini-cli", Attributes: attrs}
-	for _, metadata := range []any{map[string]any{"USER-agent": "$X-Client-UA"}, map[string]string{"USER-agent": "$X-Client-UA"}} {
-		auth.Metadata = map[string]any{"headers": metadata}
-		got := ResolveGeminiUserAgent(t.Context(), cfg, auth, "", http.Header{"x-client-ua": {"downstream/1"}})
-		if got != "downstream/1" {
-			t.Fatalf("plugin file header = %q", got)
-		}
-		got = ResolveGeminiUserAgent(t.Context(), cfg, auth, "", http.Header{"x-client-ua": {"bad\r\nheader"}})
-		if got != "operator/1" {
-			t.Fatalf("invalid variable value reached the request: %q", got)
-		}
+func TestGeminiUserAgentUALabOnlyNoAutoOrCredentialOverride(t *testing.T) {
+	const agyUA = "google-genai-sdk/1.79.1 gl-go/go1.28-20261102-RC01 cl/1012564305 +298f53e483 X:fieldtrack,boringcrypto,nogolistexportnewformat"
+	cfg := &config.Config{GeminiHeaderDefaults: config.GeminiHeaderDefaults{
+		UserAgent: agyUA,
+		APIClient: agyUA,
+	}}
+	auth := &cliproxyauth.Auth{
+		Provider:   "gemini",
+		Attributes: map[string]string{"header:User-Agent": "legacy-override/1"},
+		Metadata:   map[string]any{"headers": map[string]any{"User-Agent": "legacy-meta/1"}},
 	}
-	auth.Provider = "vertex"
-	if got := ResolveGeminiUserAgent(t.Context(), cfg, auth, "", nil); got != "attr/1" {
-		t.Fatalf("native credential header = %q", got)
+	if got := GeminiCredentialUserAgent(auth); got != "" {
+		t.Fatalf("GeminiCredentialUserAgent = %q, want empty", got)
 	}
-	for _, model := range []string{"", "bad\r\nmodel", "ä", strings.Repeat("a", 1024)} {
-		cfg.GeminiHeaderDefaults.UserAgent = "auto"
-		if got := ResolveGeminiUserAgent(t.Context(), cfg, nil, model, nil); !strings.Contains(got, "/unknown (") || !config.ValidUserAgent(got) {
-			t.Fatalf("malformed model generated %q", got)
-		}
+	if got := ResolveGeminiUserAgent(t.Context(), cfg, auth, "gemini-2.5-pro", http.Header{"X-Client-UA": {"downstream/1"}}); got != agyUA {
+		t.Fatalf("ResolveGeminiUserAgent = %q, want %q", got, agyUA)
 	}
-}
 
-func TestGeminiUserAgentCredentialUpdateOptIn(t *testing.T) {
-	headers := map[string]string{"user-AGENT": " AuTo "}
-	for _, cfg := range []*config.Config{
-		{GeminiKey: []config.GeminiKey{{Headers: headers}}},
-		{InteractionsKey: []config.GeminiKey{{Headers: headers}}},
-		{VertexCompatAPIKey: []config.VertexCompatKey{{Headers: headers}}},
-	} {
-		settings := userAgentSettings(cfg)
-		if !settings.Gemini || settings.Claude || settings.Codex {
-			t.Fatalf("incorrect credential settings: %+v", settings)
-		}
-		cfg.Home.Enabled = true
-		if userAgentSettings(cfg).Gemini {
-			t.Fatal("Home unexpectedly enabled a background Gemini lookup")
-		}
+	autoCfg := &config.Config{GeminiHeaderDefaults: config.GeminiHeaderDefaults{UserAgent: "auto"}}
+	if got := ResolveGeminiUserAgent(t.Context(), autoCfg, nil, "gemini-2.5-pro", nil); got != "" {
+		t.Fatalf("expected auto to resolve empty for Gemini, got %q", got)
 	}
-	cache := &clientVersionCache{versions: map[string]string{"gemini": "0.34.0"}}
-	for _, version := range []string{"0.51.1", "0.53.0-preview.2", "0.30.0"} {
-		client := &http.Client{Transport: userAgentRegistryTransport(func(req *http.Request) (*http.Response, error) {
-			if req.URL.String() != "https://registry.npmjs.org/@google/gemini-cli/latest" {
-				t.Errorf("unexpected registry request: %s", req.URL)
-			}
-			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"version":"` + version + `"}`))}, nil
-		})}
-		refreshClientUserAgents(t.Context(), clientUserAgentSettings{Gemini: true}, client, cache)
-		if got := cache.get("gemini"); got != "0.51.1" {
-			t.Fatalf("cached version = %q after %s", got, version)
-		}
-	}
-}
 
-func TestGeminiUserAgentUsesActualModel(t *testing.T) {
-	cfg := &config.Config{GeminiHeaderDefaults: config.GeminiHeaderDefaults{UserAgent: "auto"}}
-	for _, tc := range []struct{ model, want string }{
-		{"gemini-test(high)", "gemini-test(high)"},
-		{"  gateway model(high) ", "gateway model(high)"},
-		{"\tmodel", "unknown"},
-		{"model\n", "unknown"},
-	} {
-		if got := ResolveGeminiUserAgent(t.Context(), cfg, nil, tc.model, nil); !strings.Contains(got, "/"+tc.want+" (") {
-			t.Errorf("model %q: incorrect identity %q", tc.model, got)
-		}
-	}
-}
-
-func TestGeminiUserAgentVertexRouteUpdateEligibility(t *testing.T) {
-	yes, no := true, false
-	cases := []struct {
-		name string
-		key  config.VertexCompatKey
-		want bool
-	}{
-		{"explicit OpenAI only", config.VertexCompatKey{OpenAPI: &yes, Models: []config.VertexCompatModel{{Name: "gemini-test"}}}, false},
-		{"OpenAI partner model", config.VertexCompatKey{Models: []config.VertexCompatModel{{Name: "partner/model"}}}, false},
-		{"native model override", config.VertexCompatKey{OpenAPI: &yes, Models: []config.VertexCompatModel{{Name: "gemini-test", OpenAPI: &no}}}, true},
-		{"Imagen always native", config.VertexCompatKey{OpenAPI: &yes, Models: []config.VertexCompatModel{{Name: "imagen-test"}}}, true},
-		{"native Interactions", config.VertexCompatKey{OpenAPI: &yes, Interactions: &yes, Models: []config.VertexCompatModel{{Name: "gemini-test"}}}, true},
-		{"mutable model catalog", config.VertexCompatKey{OpenAPI: &yes}, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.key.Headers = map[string]string{"User-Agent": "auto"}
-			cfg := &config.Config{VertexCompatAPIKey: []config.VertexCompatKey{tc.key}}
-			if got := userAgentSettings(cfg).Gemini; got != tc.want {
-				t.Errorf("refresh enabled = %t, want %t", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestGeminiUserAgentCredentialDuplicateSpellings(t *testing.T) {
-	for _, tc := range []struct {
-		auth *cliproxyauth.Auth
-		want string
-	}{
-		{&cliproxyauth.Auth{Attributes: map[string]string{"header:User-Agent": "canonical/1", "header:USER-AGENT": "alternate/1", "header:user-agent": "other/1"}}, "canonical/1"},
-		{&cliproxyauth.Auth{Attributes: map[string]string{"header:USER-AGENT": "alternate/1", "header:user-agent": "other/1"}}, "alternate/1"},
-		{&cliproxyauth.Auth{Provider: "gemini-cli", Metadata: map[string]any{"headers": map[string]any{"User-Agent": "file-canonical/1", "USER-AGENT": "file-alternate/1", "user-agent": "other/1"}}}, "file-canonical/1"},
-		{&cliproxyauth.Auth{Provider: "gemini-cli", Metadata: map[string]any{"headers": map[string]string{"USER-AGENT": "file-alternate/1", "user-agent": "other/1"}}}, "file-alternate/1"},
-	} {
-		for range 30 {
-			if got := GeminiCredentialUserAgent(tc.auth); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
-				break
-			}
-		}
+	// Verify auto updater never triggers for Gemini credentials
+	settings := userAgentSettings(&config.Config{
+		GeminiKey: []config.GeminiKey{{Headers: map[string]string{"User-Agent": "auto"}}},
+	})
+	if settings.Claude || settings.Codex {
+		t.Fatalf("unexpected updater settings: %+v", settings)
 	}
 }

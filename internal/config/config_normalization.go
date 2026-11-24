@@ -86,6 +86,55 @@ func (cfg *Config) SanitizeClaudeHeaderDefaults() {
 	cfg.ClaudeHeaderDefaults.Timezone = strings.TrimSpace(cfg.ClaudeHeaderDefaults.Timezone)
 }
 
+// SanitizeGeminiHeaderDefaults trims surrounding whitespace from configured
+// Gemini UALab fingerprint values and deduplicates HeaderOrder while
+// preserving exact wire casing and order.
+func (cfg *Config) SanitizeGeminiHeaderDefaults() {
+	if cfg == nil {
+		return
+	}
+	cfg.GeminiHeaderDefaults.UserAgent = strings.TrimSpace(cfg.GeminiHeaderDefaults.UserAgent)
+	cfg.GeminiHeaderDefaults.APIClient = strings.TrimSpace(cfg.GeminiHeaderDefaults.APIClient)
+	cfg.GeminiHeaderDefaults.AcceptEncoding = strings.TrimSpace(cfg.GeminiHeaderDefaults.AcceptEncoding)
+	if len(cfg.GeminiHeaderDefaults.ExtraHeaders) > 0 {
+		cleaned := make(map[string]string, len(cfg.GeminiHeaderDefaults.ExtraHeaders))
+		for k, v := range cfg.GeminiHeaderDefaults.ExtraHeaders {
+			k = strings.TrimSpace(k)
+			v = strings.TrimSpace(v)
+			if k == "" || v == "" {
+				continue
+			}
+			cleaned[k] = v
+		}
+		if len(cleaned) == 0 {
+			cfg.GeminiHeaderDefaults.ExtraHeaders = nil
+		} else {
+			cfg.GeminiHeaderDefaults.ExtraHeaders = cleaned
+		}
+	}
+	if len(cfg.GeminiHeaderDefaults.HeaderOrder) > 0 {
+		out := make([]string, 0, len(cfg.GeminiHeaderDefaults.HeaderOrder))
+		seen := make(map[string]struct{}, len(cfg.GeminiHeaderDefaults.HeaderOrder))
+		for _, name := range cfg.GeminiHeaderDefaults.HeaderOrder {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			key := strings.ToLower(name)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, name)
+		}
+		if len(out) == 0 {
+			cfg.GeminiHeaderDefaults.HeaderOrder = nil
+		} else {
+			cfg.GeminiHeaderDefaults.HeaderOrder = out
+		}
+	}
+}
+
 // normalizeClaudeEntrypointNames trims and lowercases entrypoint names,
 // dropping empty and duplicate entries while keeping the configured order.
 func normalizeClaudeEntrypointNames(names []string) []string {
