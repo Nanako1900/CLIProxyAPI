@@ -44,6 +44,13 @@ func TestClientUserAgentStatusesReflectConfiguredBaselineWithoutChangingIt(t *te
 	if ClientUserAgentStatuses(cfg)[0].BaselineHeaders["X-Stainless-OS"] != "Linux" {
 		t.Fatal("status response aliases runtime configuration")
 	}
+	if !claude.ForceHTTP1 || len(claude.HeaderOrder) != len(claudeCodeMessagesHeaderOrder) || claude.HeaderOrder[0] != "Accept" {
+		t.Fatalf("expected Claude status to expose wire header order and forceHttp1, got forceHttp1=%v order=%v", claude.ForceHTTP1, claude.HeaderOrder)
+	}
+	claude.HeaderOrder[0] = "mutated"
+	if ClientUserAgentStatuses(cfg)[0].HeaderOrder[0] != "Accept" {
+		t.Fatal("status response aliases claudeCodeMessagesHeaderOrder")
+	}
 	cfg.Home.Enabled = true
 	if ClientUserAgentStatuses(cfg)[0].Auto.Enabled {
 		t.Fatal("Home mode incorrectly reports automatic queries enabled")

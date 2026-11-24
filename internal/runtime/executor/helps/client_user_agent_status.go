@@ -16,6 +16,8 @@ type ClientUserAgentStatus struct {
 	ResolvedUserAgent   string                    `json:"resolvedUserAgent"`
 	BaselineHeaders     map[string]string         `json:"baselineHeaders"`
 	BillingVersion      string                    `json:"billingVersion,omitempty"`
+	HeaderOrder         []string                  `json:"headerOrder,omitempty"`
+	ForceHTTP1          bool                      `json:"forceHttp1,omitempty"`
 	Auto                ClientUserAgentAutoStatus `json:"auto"`
 }
 
@@ -74,6 +76,8 @@ func ClientUserAgentStatuses(cfg *config.Config) []ClientUserAgentStatus {
 				"X-Stainless-Timeout":         "600",
 			}
 			status.BillingVersion = DefaultClaudeVersion(cfg)
+			status.HeaderOrder = append([]string(nil), claudeCodeMessagesHeaderOrder...)
+			status.ForceHTTP1 = true
 			status.Auto.Enabled = settings.Claude
 			if cfg != nil {
 				status.ConfiguredUserAgent = strings.TrimSpace(cfg.ClaudeHeaderDefaults.UserAgent)
@@ -103,6 +107,10 @@ func ClientUserAgentStatuses(cfg *config.Config) []ClientUserAgentStatus {
 				if ae := strings.TrimSpace(hd.AcceptEncoding); ae != "" {
 					status.BaselineHeaders["Accept-Encoding"] = ae
 				}
+				if len(hd.HeaderOrder) > 0 {
+					status.HeaderOrder = append([]string(nil), hd.HeaderOrder...)
+				}
+				status.ForceHTTP1 = hd.ForceHTTP1
 			}
 			status.Auto.Result = "never"
 			status.Auto.RefreshIntervalSeconds = 0
@@ -127,6 +135,10 @@ func ClientUserAgentStatuses(cfg *config.Config) []ClientUserAgentStatus {
 				if ae := strings.TrimSpace(hd.AcceptEncoding); ae != "" {
 					status.BaselineHeaders["Accept-Encoding"] = ae
 				}
+				if len(hd.HeaderOrder) > 0 {
+					status.HeaderOrder = append([]string(nil), hd.HeaderOrder...)
+				}
+				status.ForceHTTP1 = hd.ForceHTTP1
 			}
 			status.Auto.Result = "never"
 			status.Auto.RefreshIntervalSeconds = 0
