@@ -36,7 +36,6 @@ type clientUserAgentLookup struct {
 var nativeClientVersions = clientVersionCache{versions: map[string]string{
 	"codex":  "0.154.0",
 	"claude": "2.1.280",
-	"gemini": "0.34.0",
 }}
 
 func (cache *clientVersionCache) get(provider string) string {

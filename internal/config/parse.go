@@ -162,7 +162,7 @@ func validateStartupConfig(data []byte, optional bool) (*startupConfig, error) {
 
 func (cfg *Config) sanitizeStartupConfig() {
 	// Apply the same sanitization pipeline.
-	cfg.GeminiHeaderDefaults.UserAgent = strings.TrimSpace(cfg.GeminiHeaderDefaults.UserAgent)
+	cfg.SanitizeGeminiHeaderDefaults()
 	cfg.SanitizeGeminiKeys()
 	cfg.SanitizeInteractionsKeys()
 	cfg.SanitizeVertexCompatKeys()

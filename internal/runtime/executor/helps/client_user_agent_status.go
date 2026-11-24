@@ -90,10 +90,29 @@ func ClientUserAgentStatuses(cfg *config.Config) []ClientUserAgentStatus {
 				status.BaselineHeaders["X-Codex-Beta-Features"] = cfg.CodexHeaderDefaults.BetaFeatures
 			}
 		case "gemini":
-			status.Auto.Enabled = settings.Gemini
+			status.Mode = "unconfigured"
+			status.Auto.Enabled = false
+			status.Auto.RegistryURL = ""
 			if cfg != nil {
-				status.ConfiguredUserAgent = strings.TrimSpace(cfg.GeminiHeaderDefaults.UserAgent)
+				hd := cfg.GeminiHeaderDefaults
+				ua := strings.TrimSpace(hd.UserAgent)
+				if ua != "" && !strings.EqualFold(ua, "auto") {
+					status.Mode = "ualab"
+					status.ConfiguredUserAgent = ua
+					status.ResolvedUserAgent = ua
+					status.BaselineHeaders["User-Agent"] = ua
+				}
+				if apiClient := strings.TrimSpace(hd.APIClient); apiClient != "" && !strings.EqualFold(apiClient, "auto") {
+					status.BaselineHeaders["X-Goog-Api-Client"] = apiClient
+				}
+				if ae := strings.TrimSpace(hd.AcceptEncoding); ae != "" {
+					status.BaselineHeaders["Accept-Encoding"] = ae
+				}
 			}
+			status.Auto.Result = "never"
+			status.Auto.RefreshIntervalSeconds = 0
+			statuses = append(statuses, status)
+			continue
 		}
 		if status.ConfiguredUserAgent != "" {
 			status.Mode = "fixed"
@@ -107,11 +126,7 @@ func ClientUserAgentStatuses(cfg *config.Config) []ClientUserAgentStatus {
 		lookup := nativeClientVersions.lookups[provider]
 		nativeClientVersions.mu.RUnlock()
 		if status.Mode == "auto" {
-			if provider == "gemini" {
-				status.ResolvedUserAgent = geminiCLIUserAgent(version, "<model>")
-			} else {
-				status.ResolvedUserAgent = replaceClientUserAgentVersion(provider, status.ResolvedUserAgent, version)
-			}
+			status.ResolvedUserAgent = replaceClientUserAgentVersion(provider, status.ResolvedUserAgent, version)
 		} else if status.Mode == "fixed" {
 			status.ResolvedUserAgent = status.ConfiguredUserAgent
 		}

@@ -255,12 +255,10 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
         </p>
       )}
       {runtime?.homeMode && <p className={styles.note}>{t('ua_panel.home_mode')}</p>}
-      {snapshot && (!runtime || (gemini && !status)) && (
-        <p className={styles.note}>
-          {t(gemini ? 'ua_panel.gemini_runtime_unavailable' : 'ua_panel.runtime_unavailable')}
-        </p>
+      {snapshot && !gemini && !runtime && (
+        <p className={styles.note}>{t('ua_panel.runtime_unavailable')}</p>
       )}
-      {status && (
+      {status && !gemini && (
         <>
           <div className={styles.stats}>
             {[
@@ -389,7 +387,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
           }}
         />
       )}
-      {snapshot && (
+      {snapshot && !gemini && (
         <Card title={t('ua_panel.samples')}>
           {runtime?.catalogAvailable === false ? (
             <p className={styles.muted}>{t('ua_panel.catalog_unavailable')}</p>
@@ -402,19 +400,17 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
               onChange={applySample}
             />
           )}
-          <p className={styles.muted}>
-            {t(gemini ? 'ua_panel.gemini_catalog_hint' : 'ua_panel.catalog_hint')}
-          </p>
+          <p className={styles.muted}>{t('ua_panel.catalog_hint')}</p>
         </Card>
       )}
-      {runtime && (
+      {runtime && !gemini && (
         <Card
           title={t('ua_panel.credential_overrides')}
           extra={<Link to="/auth-files">{t('ua_panel.open_credentials')}</Link>}
         >
           <div className={styles.stack}>
             <p className={styles.muted}>{t('ua_panel.overrides_hint')}</p>
-            {!runtime.overrideInventoryAvailable || (gemini && !status) ? (
+            {!runtime.overrideInventoryAvailable ? (
               <p>{t('ua_panel.inventory_unavailable')}</p>
             ) : !overrides.length ? (
               <p>{t('ua_panel.no_overrides')}</p>
@@ -436,7 +432,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
           </div>
         </Card>
       )}
-      <UserAgentRules provider={provider} />
+      {!gemini && <UserAgentRules provider={provider} />}
       {draft && (
         <div className={styles.saveBar}>
           <span>

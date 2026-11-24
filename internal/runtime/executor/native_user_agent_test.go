@@ -324,12 +324,10 @@ func TestGeminiUserAgentNativeUpstream(t *testing.T) {
 				case "execute":
 					auth.Attributes["header:uSeR-AGENT"] = "auto"
 					_, err = e.Execute(t.Context(), auth, req, opts)
-					want = "auto"
 				case "stream":
 					opts.Stream = true
 					auth.Attributes["header:User-Agent"] = "$X-Client-UA"
 					opts.Headers = http.Header{"X-Client-Ua": {"mapped/4"}}
-					want = "mapped/4"
 					_, err = e.ExecuteStream(t.Context(), auth, req, opts)
 				case "count":
 					auth.Attributes["header:User-Agent"] = "$Missing"
@@ -345,7 +343,6 @@ func TestGeminiUserAgentNativeUpstream(t *testing.T) {
 						t.Fatal(errRaw)
 					}
 					resp.Body.Close()
-					want = "auto"
 				}
 				var got http.Header
 				select {
@@ -356,12 +353,7 @@ func TestGeminiUserAgentNativeUpstream(t *testing.T) {
 				default:
 					t.Fatalf("request did not reach native upstream: %v", err)
 				}
-				ua := got.Get("User-Agent")
-				if want == "auto" {
-					if !strings.HasPrefix(ua, "GeminiCLI/") || !strings.Contains(ua, "/gemini-test (") || !strings.HasSuffix(ua, "; terminal)") {
-						t.Errorf("invalid resolved UA: %q", ua)
-					}
-				} else if ua != want {
+				if ua := got.Get("User-Agent"); ua != want {
 					t.Errorf("User-Agent = %q, want %q", ua, want)
 				}
 			})
@@ -397,15 +389,10 @@ func TestGeminiUserAgentRawInteractionsBody(t *testing.T) {
 	for _, provider := range []string{"gemini", "vertex"} {
 		for _, tc := range []struct {
 			name, setting, body, want string
-			replayable, inspect       bool
 		}{
-			{"model", "auto", modelJSON, "/gemini-2.5-pro (", true, true},
-			{"large prompt", "auto", `{"model":"gemini-2.5-pro","input":"` + strings.Repeat("a", 1<<17) + `"}`, "/gemini-2.5-pro (", true, true},
-			{"nonstring", "auto", `{"model":42,"input":"hello"}`, "/unknown (", true, true},
-			{"agent", "auto", `{"agent":"agents/deep-research","input":"hello"}`, "/unknown (", true, true},
-			{"opaque", "auto", modelJSON, "/unknown (", false, false},
-			{"fixed", "myclient/1", modelJSON, "myclient/1", true, false},
-			{"default", "", modelJSON, "original/1", true, false},
+			{"auto ignored", "auto", modelJSON, "original/1"},
+			{"ualab fixed", "google-genai-sdk/1.79.1", modelJSON, "google-genai-sdk/1.79.1"},
+			{"unconfigured", "", modelJSON, "original/1"},
 		} {
 			t.Run(provider+"/"+tc.name, func(t *testing.T) {
 				cfg := &config.Config{GeminiHeaderDefaults: config.GeminiHeaderDefaults{UserAgent: tc.setting}}
@@ -419,12 +406,6 @@ func TestGeminiUserAgentRawInteractionsBody(t *testing.T) {
 					t.Fatal(err)
 				}
 				req.Header.Set("User-Agent", "original/1")
-				inspected := false
-				replay := req.GetBody
-				req.GetBody = nil
-				if tc.replayable {
-					req.GetBody = func() (io.ReadCloser, error) { inspected = true; return replay() }
-				}
 				length, original := req.ContentLength, req.Body
 				if provider == "vertex" {
 					err = NewGeminiVertexExecutor(cfg).PrepareRequest(req, auth)
@@ -434,8 +415,8 @@ func TestGeminiUserAgentRawInteractionsBody(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !strings.Contains(req.UserAgent(), tc.want) || inspected != tc.inspect {
-					t.Errorf("got UA %q, inspected %t; want %q, %t", req.UserAgent(), inspected, tc.want, tc.inspect)
+				if req.UserAgent() != tc.want {
+					t.Errorf("got UA %q; want %q", req.UserAgent(), tc.want)
 				}
 				data, errRead := io.ReadAll(req.Body)
 				if errRead != nil || req.Body != original || string(data) != tc.body || req.ContentLength != length {

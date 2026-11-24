@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -7,7 +7,9 @@ import { Select } from '@/components/ui/Select';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import type { ClientProvider } from '@/services/api/clientUserAgents';
 import {
-  isValidUserAgent,
+  formatUALabGeminiYaml,
+  parseUALabGeminiYaml,
+  UALAB_GENERATED_MARKER,
   type UserAgentDraft,
   type UserAgentProviderStatus,
   type ClaudeIdentityDraft,
@@ -22,10 +24,123 @@ type Props = {
   onChange: (draft: UserAgentDraft) => void;
 };
 
+function GeminiUALabSettings({
+  draft,
+  disabled,
+  onChange,
+}: {
+  draft: UserAgentDraft;
+  disabled: boolean;
+  onChange: (draft: UserAgentDraft) => void;
+}) {
+  const [rawYaml, setRawYaml] = useState(() => formatUALabGeminiYaml(draft.gemini));
+  const [parseError, setParseError] = useState('');
+
+  useEffect(() => {
+    setRawYaml((current) => {
+      if (current.trim()) return current;
+      return formatUALabGeminiYaml(draft.gemini);
+    });
+  }, [draft.gemini]);
+
+  const applyPastedYaml = (value: string) => {
+    setRawYaml(value);
+    if (!value.trim()) {
+      setParseError('');
+      onChange({
+        ...draft,
+        gemini: {
+          userAgent: '',
+          apiClient: '',
+          acceptEncoding: '',
+          forceHttp1: false,
+          headerOrder: [],
+          extraHeaders: {},
+        },
+      });
+      return;
+    }
+    const result = parseUALabGeminiYaml(value);
+    if (result.error) {
+      setParseError(result.error);
+      return;
+    }
+    setParseError('');
+    onChange({ ...draft, gemini: result.draft });
+  };
+
+  return (
+    <Card
+      title="Gemini — 粘贴 UALab 本地配置"
+      extra={<span className={styles.eyebrow}>{UALAB_GENERATED_MARKER}</span>}
+    >
+      <div className={styles.stack}>
+        <p className={styles.muted}>
+          Gemini 已移除 auto 与内置默认 UA 逻辑。请在本地运行{' '}
+          <code>./bin/ualab export --tag agy --format cpa-yaml</code> 后，将生成的完整 YAML 直接粘贴到下方：
+        </p>
+        <label className={styles.stack}>
+          <span>{UALAB_GENERATED_MARKER} YAML</span>
+          <textarea
+            className="input"
+            rows={14}
+            spellCheck={false}
+            disabled={disabled}
+            value={rawYaml}
+            placeholder={`${UALAB_GENERATED_MARKER} from local capture (tag: agy)\nupstream:\n  gemini:\n    header-defaults:\n      user-agent: "google-genai-sdk/..."\n      api-client: "google-genai-sdk/..."\n      accept-encoding: "gzip"\n      force-http1: true\n      header-order:\n        - Host\n        - User-Agent\n        - Content-Length\n        - Content-Type\n        - X-Goog-Api-Client\n        - X-Goog-Api-Key\n        - Accept-Encoding`}
+            onChange={(event) => applyPastedYaml(event.target.value)}
+          />
+        </label>
+        {parseError && (
+          <div role="alert" className="error-box">
+            {parseError}
+          </div>
+        )}
+        {draft.gemini.userAgent && (
+          <dl className={styles.facts}>
+            <div>
+              <dt>User-Agent</dt>
+              <dd>
+                <code>{draft.gemini.userAgent}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>X-Goog-Api-Client</dt>
+              <dd>
+                <code>{draft.gemini.apiClient || '—'}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Accept-Encoding</dt>
+              <dd>
+                <code>{draft.gemini.acceptEncoding || '—'}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Force HTTP/1.1</dt>
+              <dd>
+                <code>{String(draft.gemini.forceHttp1)}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Header Order</dt>
+              <dd>
+                <code>{draft.gemini.headerOrder.join(' -> ') || '—'}</code>
+              </dd>
+            </div>
+          </dl>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 export function UserAgentSettings({ provider, draft, status, disabled, onChange }: Props) {
   const { t } = useTranslation();
   const uaInputId = useId();
-  const gemini = provider === 'gemini';
+  if (provider === 'gemini') {
+    return <GeminiUALabSettings draft={draft} disabled={disabled} onChange={onChange} />;
+  }
   const current = draft[provider];
   const mode = !current.userAgent.trim()
     ? 'default'
@@ -57,23 +172,15 @@ export function UserAgentSettings({ provider, draft, status, disabled, onChange 
               variant={mode === value ? 'primary' : 'ghost'}
               disabled={disabled}
               aria-pressed={mode === value}
-              onClick={() => {
-                if (gemini && value === 'fixed') {
-                  const input = document.getElementById(uaInputId);
-                  if (input instanceof HTMLInputElement) {
-                    input.focus();
-                    input.select();
-                  }
-                  return;
-                }
+              onClick={() =>
                 setUA(
                   value === 'default'
                     ? ''
                     : value === 'auto'
                       ? 'auto'
                       : status?.resolvedUserAgent || status?.defaultUserAgent || current.userAgent
-                );
-              }}
+                )
+              }
             >
               {t('ua_panel.mode_' + value)}
             </Button>
@@ -86,13 +193,10 @@ export function UserAgentSettings({ provider, draft, status, disabled, onChange 
           disabled={disabled}
           spellCheck={false}
           placeholder={t('ua_panel.default_placeholder')}
-          hint={t(gemini ? 'ua_panel.gemini_ua_hint' : 'ua_panel.ua_hint')}
-          error={gemini && !isValidUserAgent(current.userAgent) ? t('ua_panel.invalid_ua') : undefined}
+          hint={t('ua_panel.ua_hint')}
           onChange={(event) => setUA(event.target.value)}
         />
-        {mode === 'auto' && (
-          <p className={styles.note}>{t(gemini ? 'ua_panel.gemini_auto_scope' : 'ua_panel.auto_scope')}</p>
-        )}
+        {mode === 'auto' && <p className={styles.note}>{t('ua_panel.auto_scope')}</p>}
         <p className={styles.muted}>{t('ua_panel.scope_' + provider)}</p>
         {provider === 'claude' ? (
           <>

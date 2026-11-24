@@ -1,7 +1,6 @@
 package helps
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -52,8 +51,16 @@ func TestClientUserAgentStatusesReflectConfiguredBaselineWithoutChangingIt(t *te
 }
 
 func TestGeminiUserAgentStatus(t *testing.T) {
-	for _, value := range []string{"", "my-tool/1", "auto"} {
-		cfg, err := config.ParseConfigBytes([]byte("upstream: {gemini: {header-defaults: {user-agent: '" + value + "'}}}"))
+	const agyUA = "google-genai-sdk/1.79.1 gl-go/go1.28-20261102-RC01"
+	for _, tc := range []struct {
+		yaml     string
+		wantMode string
+		wantUA   string
+	}{
+		{yaml: "upstream: {gemini: {header-defaults: {user-agent: ''}}}", wantMode: "unconfigured", wantUA: ""},
+		{yaml: "upstream: {gemini: {header-defaults: {user-agent: '" + agyUA + "', api-client: '" + agyUA + "'}}}", wantMode: "ualab", wantUA: agyUA},
+	} {
+		cfg, err := config.ParseConfigBytes([]byte(tc.yaml))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -62,15 +69,11 @@ func TestGeminiUserAgentStatus(t *testing.T) {
 			t.Fatal("missing Gemini status")
 		}
 		gemini := statuses[2]
-		if gemini.DefaultUserAgent != "" || len(gemini.BaselineHeaders) != 0 {
-			t.Fatal("Gemini baseline varies by executor")
+		if gemini.Auto.Enabled || gemini.Auto.RegistryURL != "" {
+			t.Fatalf("Gemini auto must be disabled: %+v", gemini)
 		}
-		if value == "auto" {
-			if !gemini.Auto.Enabled || gemini.Mode != "auto" || !strings.Contains(gemini.ResolvedUserAgent, "/<model> (") || gemini.Auto.RegistryURL != "https://registry.npmjs.org/@google/gemini-cli/latest" {
-				t.Fatalf("unexpected Gemini preview: %+v", gemini)
-			}
-		} else if gemini.ResolvedUserAgent != value || gemini.Auto.Enabled {
-			t.Fatalf("unexpected resolved UA %q", gemini.ResolvedUserAgent)
+		if gemini.Mode != tc.wantMode || gemini.ResolvedUserAgent != tc.wantUA {
+			t.Fatalf("unexpected Gemini status: %+v", gemini)
 		}
 	}
 }

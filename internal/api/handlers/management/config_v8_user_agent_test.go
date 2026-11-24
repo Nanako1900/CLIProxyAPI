@@ -92,9 +92,9 @@ func TestConfigV8GeminiUserAgentRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.HasPrefix(ua, "bad") {
+		if strings.HasPrefix(ua, "bad") || ua == "auto" {
 			if response.Code != http.StatusUnprocessableEntity || string(before) != string(after) {
-				t.Fatalf("invalid UA write: %d %s", response.Code, response.Body)
+				t.Fatalf("invalid/auto UA write: %q -> %d %s", ua, response.Code, response.Body)
 			}
 			continue
 		}
