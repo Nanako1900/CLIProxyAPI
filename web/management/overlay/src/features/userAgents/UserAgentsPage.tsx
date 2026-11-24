@@ -10,6 +10,7 @@ import { ClientUserAgentPicker } from '@/features/config/components/blocks/Clien
 import { clientProviderNames, type ClientIdentityPatch } from '@/features/config/clientUserAgents';
 import type { ClientProvider } from '@/services/api/clientUserAgents';
 import {
+  formatUALabClaudeYaml,
   userAgentPanelConnection,
   userAgentChanges,
   validateUserAgentDraft,
@@ -43,6 +44,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [review, setReview] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [loadedAt, setLoadedAt] = useState('');
   const [catalogRevision, setCatalogRevision] = useState(0);
   const alive = useRef(false);
@@ -200,6 +202,29 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
       if (alive.current) setNotice('copy_failed');
     }
   };
+  const claudeStatus = runtime?.providers.find((item) => item.provider === 'claude');
+  const claudeExportYaml = draft ? formatUALabClaudeYaml(draft.claude, claudeStatus) : '';
+  const copyClaudeExport = async () => {
+    if (!claudeExportYaml) return;
+    try {
+      await navigator.clipboard.writeText(claudeExportYaml);
+      if (alive.current) setNotice('copied');
+    } catch {
+      if (alive.current) setNotice('copy_failed');
+    }
+  };
+  const downloadClaudeExport = () => {
+    if (!claudeExportYaml) return;
+    const blob = new Blob([claudeExportYaml], { type: 'application/x-yaml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'cpa-claude-ualab.yaml';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
   const uaVersion = status?.resolvedUserAgent.match(/^claude-cli\/(\d+\.\d+\.\d+)/)?.[1];
   const versionSplit =
     provider === 'claude' &&
@@ -216,6 +241,15 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
           <p>{t('ua_panel.description')}</p>
         </div>
         <div className={styles.actions}>
+          {provider === 'claude' && (
+            <Button
+              variant="secondary"
+              disabled={!draft || disabled}
+              onClick={() => setExportOpen(true)}
+            >
+              导出当前 UA (UALab)
+            </Button>
+          )}
           <Button variant="ghost" disabled={!runtime || disabled} onClick={() => void copyReport()}>
             {t('ua_panel.copy_report')}
           </Button>
@@ -486,6 +520,37 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
               <pre>{JSON.stringify(change.after, null, 2)}</pre>
             </div>
           ))}
+        </div>
+      </Modal>
+      <Modal
+        open={exportOpen}
+        title="导出 Claude 当前 UA (UALab 格式)"
+        onClose={() => setExportOpen(false)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setExportOpen(false)}>
+              关闭
+            </Button>
+            <Button variant="secondary" disabled={!claudeExportYaml} onClick={downloadClaudeExport}>
+              下载 .yaml
+            </Button>
+            <Button disabled={!claudeExportYaml} onClick={() => void copyClaudeExport()}>
+              复制 YAML
+            </Button>
+          </>
+        }
+      >
+        <div className={styles.stack}>
+          <p className={styles.muted}>
+            以下为 CPA 当前 Claude 平台配置与运行时基准（含完整 Header 与 Wire 头序）按 UALab 格式导出的只读快照，不会修改当前任何 Claude 实现。
+          </p>
+          <textarea
+            className="input"
+            rows={22}
+            readOnly
+            spellCheck={false}
+            value={claudeExportYaml}
+          />
         </div>
       </Modal>
     </div>
