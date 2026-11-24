@@ -224,6 +224,73 @@ func TestConvertAntigravityResponseToClaudeNonStream_ExcludesCachedTokensFromInp
 	}
 }
 
+func TestConvertAntigravityResponseToClaudeStream_WaitsForNonEmptyFinishReason(t *testing.T) {
+	requestJSON := []byte(`{"model":"gemini-3.1-flash-lite"}`)
+
+	for _, tt := range []struct {
+		name              string
+		emptyFinishReason string
+	}{
+		{name: "null", emptyFinishReason: `null`},
+		{name: "empty string", emptyFinishReason: `""`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			firstChunk := []byte(`{
+				"response": {
+					"candidates": [{
+						"content": {"parts": [{"text": "hello"}]},
+						"finishReason": ` + tt.emptyFinishReason + `
+					}],
+					"usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 1, "totalTokenCount": 11}
+				}
+			}`)
+			finalChunk := []byte(`{
+				"response": {
+					"candidates": [{
+						"content": {"parts": [{"text": " world"}]},
+						"finishReason": "STOP"
+					}],
+					"usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5, "totalTokenCount": 15}
+				}
+			}`)
+
+			var param any
+			firstOutput := bytes.Join(ConvertAntigravityResponseToClaude(context.Background(), "gemini-3.1-flash-lite", requestJSON, requestJSON, firstChunk, &param), nil)
+			firstText := string(firstOutput)
+			if strings.Contains(firstText, "event: content_block_stop\n") || strings.Contains(firstText, "event: message_delta\n") {
+				t.Fatalf("empty finishReason finalized the stream prematurely:\n%s", firstText)
+			}
+
+			output := append([]byte{}, firstOutput...)
+			output = append(output, bytes.Join(ConvertAntigravityResponseToClaude(context.Background(), "gemini-3.1-flash-lite", requestJSON, requestJSON, finalChunk, &param), nil)...)
+			output = append(output, bytes.Join(ConvertAntigravityResponseToClaude(context.Background(), "gemini-3.1-flash-lite", requestJSON, requestJSON, []byte("[DONE]"), &param), nil)...)
+			outputText := string(output)
+
+			if got := strings.Count(outputText, "event: content_block_start\n"); got != 1 {
+				t.Fatalf("content_block_start count = %d, want 1:\n%s", got, outputText)
+			}
+			if got := strings.Count(outputText, "event: content_block_stop\n"); got != 1 {
+				t.Fatalf("content_block_stop count = %d, want 1:\n%s", got, outputText)
+			}
+			if got := strings.Count(outputText, "event: message_delta\n"); got != 1 {
+				t.Fatalf("message_delta count = %d, want 1:\n%s", got, outputText)
+			}
+
+			secondText := strings.Index(outputText, `"text":" world"`)
+			blockStop := strings.Index(outputText, "event: content_block_stop\n")
+			messageDelta := strings.Index(outputText, "event: message_delta\n")
+			if secondText < 0 || blockStop < secondText || messageDelta < blockStop {
+				t.Fatalf("stream events are out of order:\n%s", outputText)
+			}
+
+			messageDeltaData := sseDataForEvent(t, outputText, "message_delta")
+			if got := ojson.Get(messageDeltaData, "usage.output_tokens").Int(); got != 5 {
+				t.Fatalf("output_tokens = %d, want 5: %s", got, messageDeltaData)
+			}
+		})
+	}
+}
+
 func TestConvertAntigravityResponseToClaudeStream_EmptyCandidateClosesMessage(t *testing.T) {
 	requestJSON := []byte(`{"model":"gemini-3-flash-agent"}`)
 	responseJSON := testEmptyAntigravityResponse()
@@ -388,6 +455,32 @@ func TestBuildWebSearchCitedTextBlocks_TrimsOverlappingGroundingSupports(t *test
 	}
 	if gotCitation := blocks[1].Citations[0]["cited_text"]; gotCitation != blocks[1].Text {
 		t.Fatalf("cited_text = %q, want emitted text %q", gotCitation, blocks[1].Text)
+	}
+}
+
+func TestBuildWebSearchCitedTextBlocks_PreservesTextWithoutChunkURLs(t *testing.T) {
+	textContent := "Hello world. Missing citation segment. Tail sentence."
+
+	blocks := buildWebSearchCitedTextBlocks(textContent, []webSearchGroundingSupport{
+		{
+			StartIndex: 13,
+			EndIndex:   38,
+			Text:       "Missing citation segment.",
+		},
+	})
+
+	var got strings.Builder
+	for _, block := range blocks {
+		got.WriteString(block.Text)
+	}
+	if got.String() != textContent {
+		t.Fatalf("joined text = %q, want %q", got.String(), textContent)
+	}
+	if len(blocks) != 3 || blocks[1].Text != "Missing citation segment." {
+		t.Fatalf("uncited block not preserved: %#v", blocks)
+	}
+	if blocks[1].Citations != nil {
+		t.Fatalf("uncited block citations = %#v, want nil", blocks[1].Citations)
 	}
 }
 
@@ -876,6 +969,48 @@ func TestConvertAntigravityResponseToClaude_VisibleGeminiSignatureUsesLeadingCar
 	textPos := strings.Index(outputText, `"type":"text_delta","text":"visible answer"`)
 	if carrierPos < 0 || signaturePos < carrierPos || textPos < signaturePos {
 		t.Fatalf("visible signature carrier must precede text: %s", output)
+	}
+}
+
+func TestConvertAntigravityResponseToClaude_EmptyFunctionCallPreservesThoughtSignature(t *testing.T) {
+	requestJSON := []byte(`{"model":"gemini-3.6-flash-high"}`)
+	validSignature := testGeminiEPrefixSignature(t)
+	emptyCallChunk := []byte(`{"response":{"candidates":[{"content":{"parts":[{"thoughtSignature":"` + validSignature + `","functionCall":{}}]},"finishReason":"STOP"}],"modelVersion":"gemini-3.6-flash","responseId":"resp-empty-tool"}}`)
+	testCases := []struct {
+		name   string
+		chunks [][]byte
+	}{
+		{name: "first part", chunks: [][]byte{emptyCallChunk}},
+		{
+			name: "after visible text",
+			chunks: [][]byte{
+				[]byte(`{"response":{"candidates":[{"content":{"parts":[{"text":"visible answer"}]}}],"modelVersion":"gemini-3.6-flash","responseId":"resp-empty-tool"}}`),
+				emptyCallChunk,
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var param any
+			var output []byte
+			for _, chunk := range testCase.chunks {
+				output = append(output, bytes.Join(ConvertAntigravityResponseToClaude(context.Background(), "gemini-3.6-flash-high", requestJSON, requestJSON, chunk, &param), nil)...)
+			}
+			outputText := string(output)
+			carrierSignature := encodeGeminiClaudeCarrierSignature(validSignature, geminiClaudeCarrierNext, geminiClaudeCarrierAny)
+
+			if !strings.Contains(outputText, `"type":"signature_delta","signature":"`+carrierSignature+`"`) {
+				t.Fatalf("empty function call must preserve its thought signature: %s", outputText)
+			}
+			decodedSignature, direction, targetKind, marked, ok := decodeGeminiClaudeCarrierSignature(carrierSignature)
+			if !ok || !marked || decodedSignature != validSignature || direction != geminiClaudeCarrierNext || targetKind != geminiClaudeCarrierAny {
+				t.Fatalf("invalid signature carrier: signature=%q direction=%q target=%q marked=%t ok=%t", decodedSignature, direction, targetKind, marked, ok)
+			}
+			if strings.Contains(outputText, `"content_block":{"type":"tool_use"`) {
+				t.Fatalf("empty function call must not emit a tool_use block: %s", outputText)
+			}
+		})
 	}
 }
 
