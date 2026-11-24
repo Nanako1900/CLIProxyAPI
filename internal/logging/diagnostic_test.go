@@ -109,3 +109,28 @@ func TestSafeErrorDiagnosticDoesNotExtractURLQueryValues(t *testing.T) {
 		}
 	}
 }
+
+func TestSafeDetailForErrorDisplayPreservesNewlinesAndRedactsSecrets(t *testing.T) {
+	raw := "HTTP 401\r\n" +
+		`{"error":"invalid_grant","access_token":"acc-secret","cookie":"sid=cookie-secret"}` + "\n" +
+		"Authorization: Bearer bearer-secret\n" +
+		"https://u:p@proxy.example:1080/path"
+
+	got := SafeDetailForErrorDisplay(raw, 0)
+	if !strings.Contains(got, "\n") {
+		t.Fatalf("expected newlines to be preserved: %q", got)
+	}
+	for _, secret := range []string{"acc-secret", "cookie-secret", "bearer-secret", "u:p@"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("SafeDetailForErrorDisplay leaked %q: %q", secret, got)
+		}
+	}
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("expected redaction marker: %q", got)
+	}
+
+	truncated := SafeDetailForErrorDisplay(strings.Repeat("a", 200), 50)
+	if !strings.HasSuffix(truncated, "...") || len([]rune(truncated)) > 53 {
+		t.Fatalf("unexpected truncation: %q", truncated)
+	}
+}

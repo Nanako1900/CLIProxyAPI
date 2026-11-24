@@ -2303,6 +2303,9 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 
 	m.hook.OnResult(ctx, result)
 	m.publishErrorEvent(result, authSnapshot)
+	if !result.Success && !m.HomeEnabled() {
+		m.recordAuthErrorFromResult(ctx, result, authSnapshot)
+	}
 	m.updateSessionAffinity(ctx, result)
 }
 
@@ -2388,6 +2391,9 @@ func (m *Manager) recordAvailabilityNeutralResult(ctx context.Context, result Re
 
 	m.hook.OnResult(ctx, result)
 	m.publishErrorEvent(result, authSnapshot)
+	if !result.Success && !m.HomeEnabled() {
+		m.recordAuthErrorFromResult(ctx, result, authSnapshot)
+	}
 }
 
 func existingModelState(auth *Auth, model string) *ModelState {

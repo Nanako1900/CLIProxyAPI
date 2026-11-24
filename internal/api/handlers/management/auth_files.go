@@ -1,6 +1,7 @@
 package management
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codex"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/credentialweight"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -840,6 +842,23 @@ func (h *Handler) buildAuthFileEntryLocked(auth *coreauth.Auth, quota authFileQu
 				"code":        auth.RefreshError.Code,
 				"message":     auth.RefreshError.Message,
 				"http_status": auth.RefreshError.HTTPStatus,
+			}
+		}
+		if h != nil && h.authManager != nil {
+			errSummary := h.authManager.AuthErrorSummary(context.Background(), auth.ID)
+			if errSummary.Total > 0 {
+				entry["recent_error_count"] = errSummary.Total
+			}
+			if errSummary.Latest != nil {
+				entry["last_error"] = errSummary.Latest
+			}
+		}
+		if _, hasLastErr := entry["last_error"]; !hasLastErr && auth.LastError != nil {
+			entry["last_error"] = gin.H{
+				"code":        strings.TrimSpace(auth.LastError.Code),
+				"http_status": auth.LastError.HTTPStatus,
+				"message":     logging.SafeDetailForErrorDisplay(auth.LastError.Message, 300),
+				"retryable":   auth.LastError.Retryable,
 			}
 		}
 		if auth.RequiresSignIn {

@@ -1,0 +1,571 @@
+diff --git a/src/features/authFiles/AuthFilesPage.tsx b/src/features/authFiles/AuthFilesPage.tsx
+index 01ec04b..6cb718c 100644
+--- a/src/features/authFiles/AuthFilesPage.tsx
++++ b/src/features/authFiles/AuthFilesPage.tsx
+@@ -26,6 +26,8 @@ import { AuthFileDetailsSheet } from '@/features/authFiles/components/AuthFileDe
+ import { getAuthFileRefreshKey } from '@/features/authFiles/manualRefresh';
+ import { AuthFileRefreshResults } from '@/features/authFiles/components/AuthFileRefreshResults';
+ import { AuthFileModelsModal } from '@/features/authFiles/components/AuthFileModelsModal';
++import { AuthFileErrorsModal } from '@/features/authFiles/components/AuthFileErrorsModal';
++import type { AuthFileItem } from '@/types';
+ import { AuthFilesToolbar } from '@/features/authFiles/components/AuthFilesToolbar';
+ import { BatchActionBar } from '@/features/authFiles/components/BatchActionBar';
+ import { OAuthExcludedCard } from '@/features/authFiles/components/OAuthExcludedCard';
+@@ -99,6 +101,7 @@ export function AuthFilesPage() {
+   const [viewMode, setViewMode] = useState<'diagram' | 'list'>('list');
+   const [sortMode, setSortMode] = useState<AuthFilesSortMode>('default');
+   const [uiStateHydrated, setUiStateHydrated] = useState(false);
++  const [errorModalFile, setErrorModalFile] = useState<AuthFileItem | null>(null);
+ 
+   const {
+     modelsModalOpen,
+@@ -717,6 +720,7 @@ export function AuthFilesPage() {
+                 statusBarCache={statusBarCache}
+                 entranceDelayMs={cardEntranceDelay(index)}
+                 onShowModels={showModels}
++                onShowErrors={setErrorModalFile}
+                 onDownload={handleDownload}
+                 onManualRefresh={handleManualRefresh}
+                 onCooldownReset={handleCooldownReset}
+@@ -800,6 +804,14 @@ export function AuthFilesPage() {
+         onCopyText={copyTextWithNotification}
+       />
+ 
++      <AuthFileErrorsModal
++        file={errorModalFile}
++        disableControls={disableControls}
++        onClose={() => setErrorModalFile(null)}
++        onCopyText={copyTextWithNotification}
++        onHistoryCleared={() => void loadFiles({ background: true })}
++      />
++
+       <AuthFileDetailsSheet
+         disableControls={disableControls}
+         editor={prefixProxyEditor}
+diff --git a/src/features/authFiles/components/AuthFileCard.module.scss b/src/features/authFiles/components/AuthFileCard.module.scss
+index a7dded0..0c90b99 100644
+--- a/src/features/authFiles/components/AuthFileCard.module.scss
++++ b/src/features/authFiles/components/AuthFileCard.module.scss
+@@ -159,6 +159,42 @@
+   margin-top: 2px;
+ }
+ 
++.warningButton {
++  width: 100%;
++  text-align: left;
++  cursor: pointer;
++  font-family: inherit;
++  transition:
++    background-color 140ms ease,
++    border-color 140ms ease;
++
++  &:hover {
++    background: color-mix(in srgb, var(--warning-bg) 82%, var(--warning-border));
++    border-color: color-mix(in srgb, var(--warning-border) 75%, var(--warning-text));
++  }
++
++  &:focus-visible {
++    outline: 2px solid var(--primary-color);
++    outline-offset: 2px;
++  }
++}
++
++.warningText {
++  flex: 1;
++  min-width: 0;
++  overflow-wrap: anywhere;
++  @include text-ellipsis-multiline(2);
++}
++
++.warningAction {
++  flex-shrink: 0;
++  margin-left: auto;
++  font-size: 11px;
++  font-weight: 600;
++  white-space: nowrap;
++  opacity: 0.88;
++}
++
+ /* ---------- 健康区：eyebrow + 计数 + 状态条 ---------- */
+ 
+ .health {
+@@ -210,6 +246,27 @@
+   color: var(--viz-failure);
+ }
+ 
++.countFailButton {
++  border: 0;
++  background: transparent;
++  padding: 0;
++  font: inherit;
++  cursor: pointer;
++  text-decoration: underline;
++  text-decoration-style: dotted;
++  text-underline-offset: 2px;
++
++  &:hover {
++    text-decoration-style: solid;
++  }
++
++  &:focus-visible {
++    outline: 2px solid var(--primary-color);
++    outline-offset: 2px;
++    border-radius: 4px;
++  }
++}
++
+ /* ---------- ProviderStatusBar 注入样式（18 个契约类名） ---------- */
+ 
+ .statusBar {
+diff --git a/src/features/authFiles/components/AuthFileCard.tsx b/src/features/authFiles/components/AuthFileCard.tsx
+index 69690d0..7360c65 100644
+--- a/src/features/authFiles/components/AuthFileCard.tsx
++++ b/src/features/authFiles/components/AuthFileCard.tsx
+@@ -29,6 +29,7 @@ import {
+   type AuthFileQuotaFilter,
+   type ResolvedTheme,
+ } from '@/features/authFiles/constants';
++import { resolveAuthFileCardErrorPreview } from '@/services/api/authFileErrors';
+ import { deriveAuthFileIdentity } from '@/features/authFiles/identity';
+ import { resolveAuthFileQuotaType } from '@/features/authFiles/logic';
+ import type { AuthFileStatusBarData } from '@/features/authFiles/hooks/useAuthFilesStatusBarCache';
+@@ -53,6 +54,7 @@ export type AuthFileCardProps = {
+   /** One-time entrance delay; null/undefined disables entrance motion. */
+   entranceDelayMs?: number | null;
+   onShowModels: (file: AuthFileItem) => void;
++  onShowErrors?: (file: AuthFileItem) => void;
+   onDownload: (name: string) => void;
+   onManualRefresh: (file: AuthFileItem) => void;
+   onCooldownReset: (file: AuthFileItem) => void;
+@@ -78,6 +80,7 @@ export function AuthFileCard(props: AuthFileCardProps) {
+     statusBarCache,
+     entranceDelayMs,
+     onShowModels,
++    onShowErrors,
+     onDownload,
+     onManualRefresh,
+     onCooldownReset,
+@@ -109,6 +112,11 @@ export function AuthFileCard(props: AuthFileCardProps) {
+ 
+   const rawStatusMessage = getAuthFileStatusMessage(file);
+   const hasStatusWarning = hasAuthFileStatusWarning(file);
++  const errorPreview = resolveAuthFileCardErrorPreview(file, t('auth_files.error_status_fallback'));
++  const warningText =
++    rawStatusMessage && hasStatusWarning ? rawStatusMessage : errorPreview.text;
++  const displayFailureCount = Math.max(failureCount, errorPreview.recentCount);
++  const canOpenErrors = Boolean(onShowErrors && errorPreview.clickable);
+ 
+   const priorityValue = Number.isSafeInteger(file.priority) ? file.priority : undefined;
+   const weightValue = Number.isSafeInteger(file.weight) ? file.weight : undefined;
+@@ -182,12 +190,24 @@ export function AuthFileCard(props: AuthFileCardProps) {
+         </p>
+       )}
+ 
+-      {rawStatusMessage && hasStatusWarning && (
+-        <div className={styles.warning} title={rawStatusMessage}>
+-          <IconInfo className={styles.warningIcon} size={14} />
+-          <span>{rawStatusMessage}</span>
+-        </div>
+-      )}
++      {warningText &&
++        (onShowErrors ? (
++          <button
++            type="button"
++            className={`${styles.warning} ${styles.warningButton}`}
++            title={`${warningText}\n${t('auth_files.error_click_to_inspect')}`}
++            onClick={() => onShowErrors(file)}
++          >
++            <IconInfo className={styles.warningIcon} size={14} />
++            <span className={styles.warningText}>{warningText}</span>
++            <span className={styles.warningAction}>{t('auth_files.error_view_details')}</span>
++          </button>
++        ) : (
++          <div className={styles.warning} title={warningText}>
++            <IconInfo className={styles.warningIcon} size={14} />
++            <span>{warningText}</span>
++          </div>
++        ))}
+ 
+       <AuthFileCooldownSection
+         snapshot={file.cooldownSnapshot}
+@@ -210,12 +230,23 @@ export function AuthFileCard(props: AuthFileCardProps) {
+             >
+               {t('stats.success')} {successCount}
+             </span>
+-            <span
+-              className={`${styles.countFail} ${failureCount > 0 ? styles.countLive : ''}`}
+-              title={t('stats.failure')}
+-            >
+-              {t('stats.failure')} {failureCount}
+-            </span>
++            {canOpenErrors ? (
++              <button
++                type="button"
++                className={`${styles.countFail} ${displayFailureCount > 0 ? styles.countLive : ''} ${styles.countFailButton}`}
++                title={t('auth_files.error_click_to_inspect')}
++                onClick={() => onShowErrors?.(file)}
++              >
++                {t('stats.failure')} {displayFailureCount}
++              </button>
++            ) : (
++              <span
++                className={`${styles.countFail} ${failureCount > 0 ? styles.countLive : ''}`}
++                title={t('stats.failure')}
++              >
++                {t('stats.failure')} {failureCount}
++              </span>
++            )}
+           </span>
+         </div>
+         <ProviderStatusBar statusData={statusData} styles={styles} />
+diff --git a/src/i18n/locales/en.json b/src/i18n/locales/en.json
+index 70337ed..d5b8b59 100644
+--- a/src/i18n/locales/en.json
++++ b/src/i18n/locales/en.json
+@@ -480,7 +480,32 @@
+     "quota_refresh_single": "Refresh quota",
+     "quota_refresh_hint": "Refresh quota only for this credential",
+     "quota_refresh_success": "Quota refreshed for \"{{name}}\"",
+-    "quota_refresh_failed": "Failed to refresh quota for \"{{name}}\": {{message}}"
++    "quota_refresh_failed": "Failed to refresh quota for \"{{name}}\": {{message}}",
++    "error_status_fallback": "Credential error",
++    "error_view_details": "Details",
++    "error_click_to_inspect": "Click to inspect error details",
++    "error_modal_title": "Error details",
++    "error_modal_loading": "Loading error details...",
++    "error_modal_load_failed": "Failed to load error details",
++    "error_modal_clear": "Clear history",
++    "error_modal_clear_failed": "Failed to clear error history",
++    "error_modal_current_section": "Current error",
++    "error_modal_status": "Status",
++    "error_modal_models_section": "Model errors ({{count}})",
++    "error_modal_history_section": "Recent failures ({{count}})",
++    "error_modal_empty_title": "No persisted failures",
++    "error_modal_empty_desc": "Failed upstream attempts and token refresh errors for this credential will appear here.",
++    "error_modal_retry_after": "Retry after {{time}}",
++    "error_modal_cooldown_until": "Cooldown until {{time}}",
++    "error_modal_view_raw_log": "View raw log",
++    "error_modal_hide_raw_log": "Hide raw log",
++    "error_modal_raw_log_empty": "(empty log)",
++    "error_modal_raw_log_failed": "Failed to load request log",
++    "error_phase_execute": "Request",
++    "error_phase_stream": "Stream",
++    "error_phase_prepare": "Prepare",
++    "error_phase_refresh": "Refresh",
++    "error_phase_count_tokens": "Count tokens"
+   },
+   "antigravity_subscription": {
+     "plan_unknown": "Unknown",
+diff --git a/src/i18n/locales/ko.json b/src/i18n/locales/ko.json
+index 9b88551..c1a2286 100644
+--- a/src/i18n/locales/ko.json
++++ b/src/i18n/locales/ko.json
+@@ -480,7 +480,32 @@
+     "quota_refresh_single": "할당량 새로 고침",
+     "quota_refresh_hint": "이 자격 증명의 할당량만 새로 고침합니다",
+     "quota_refresh_success": "\"{{name}}\"의 할당량을 새로 고쳤습니다",
+-    "quota_refresh_failed": "\"{{name}}\"의 할당량 새로 고침 실패: {{message}}"
++    "quota_refresh_failed": "\"{{name}}\"의 할당량 새로 고침 실패: {{message}}",
++    "error_status_fallback": "자격 증명 오류",
++    "error_view_details": "상세",
++    "error_click_to_inspect": "클릭하여 오류 상세 보기",
++    "error_modal_title": "오류 상세",
++    "error_modal_loading": "오류 상세 정보를 불러오는 중...",
++    "error_modal_load_failed": "오류 상세 정보를 불러오지 못했습니다",
++    "error_modal_clear": "기록 지우기",
++    "error_modal_clear_failed": "오류 기록을 지우지 못했습니다",
++    "error_modal_current_section": "현재 오류",
++    "error_modal_status": "상태",
++    "error_modal_models_section": "모델별 오류 ({{count}})",
++    "error_modal_history_section": "최근 실패 기록 ({{count}})",
++    "error_modal_empty_title": "저장된 실패 기록 없음",
++    "error_modal_empty_desc": "이 자격 증명의 업스트림 요청 실패 및 토큰 갱신 오류가 여기에 기록됩니다.",
++    "error_modal_retry_after": "재시도 시각 {{time}}",
++    "error_modal_cooldown_until": "쿨다운 종료 {{time}}",
++    "error_modal_view_raw_log": "원본 로그 보기",
++    "error_modal_hide_raw_log": "원본 로그 숨기기",
++    "error_modal_raw_log_empty": "(빈 로그)",
++    "error_modal_raw_log_failed": "원본 요청 로그를 불러오지 못했습니다",
++    "error_phase_execute": "요청",
++    "error_phase_stream": "스트림",
++    "error_phase_prepare": "준비",
++    "error_phase_refresh": "갱신",
++    "error_phase_count_tokens": "토큰 계산"
+   },
+   "antigravity_subscription": {
+     "plan_unknown": "알 수 없음",
+diff --git a/src/i18n/locales/ru.json b/src/i18n/locales/ru.json
+index 512b7aa..802ef10 100644
+--- a/src/i18n/locales/ru.json
++++ b/src/i18n/locales/ru.json
+@@ -483,7 +483,32 @@
+     "quota_refresh_single": "Обновить квоту",
+     "quota_refresh_hint": "Обновить квоту только для этих учётных данных",
+     "quota_refresh_success": "Квота для \"{{name}}\" обновлена",
+-    "quota_refresh_failed": "Не удалось обновить квоту для \"{{name}}\": {{message}}"
++    "quota_refresh_failed": "Не удалось обновить квоту для \"{{name}}\": {{message}}",
++    "error_status_fallback": "Ошибка учетных данных",
++    "error_view_details": "Подробнее",
++    "error_click_to_inspect": "Нажмите, чтобы посмотреть детали ошибки",
++    "error_modal_title": "Детали ошибки",
++    "error_modal_loading": "Загрузка деталей ошибки...",
++    "error_modal_load_failed": "Не удалось загрузить детали ошибки",
++    "error_modal_clear": "Очистить историю",
++    "error_modal_clear_failed": "Не удалось очистить историю ошибок",
++    "error_modal_current_section": "Текущая ошибка",
++    "error_modal_status": "Статус",
++    "error_modal_models_section": "Ошибки моделей ({{count}})",
++    "error_modal_history_section": "Последние сбои ({{count}})",
++    "error_modal_empty_title": "Нет сохраненных ошибок",
++    "error_modal_empty_desc": "Здесь будут отображаться сбои запросов и ошибки обновления токена для этого аккаунта.",
++    "error_modal_retry_after": "Повтор после {{time}}",
++    "error_modal_cooldown_until": "Охлаждение до {{time}}",
++    "error_modal_view_raw_log": "Показать исходный лог",
++    "error_modal_hide_raw_log": "Скрыть исходный лог",
++    "error_modal_raw_log_empty": "(пустой лог)",
++    "error_modal_raw_log_failed": "Не удалось загрузить лог запроса",
++    "error_phase_execute": "Запрос",
++    "error_phase_stream": "Поток",
++    "error_phase_prepare": "Подготовка",
++    "error_phase_refresh": "Обновление",
++    "error_phase_count_tokens": "Подсчет токенов"
+   },
+   "antigravity_subscription": {
+     "plan_unknown": "Неизвестно",
+diff --git a/src/i18n/locales/tr.json b/src/i18n/locales/tr.json
+index fc8212d..108d140 100644
+--- a/src/i18n/locales/tr.json
++++ b/src/i18n/locales/tr.json
+@@ -480,7 +480,32 @@
+     "quota_refresh_single": "Kotayı Yenile",
+     "quota_refresh_hint": "Yalnızca Bu Kimlik Bilgisinin Kotasını Yenile",
+     "quota_refresh_success": "“{{name}}” için Kota Yenilendi",
+-    "quota_refresh_failed": "“{{name}}” için Kota Yenilenemedi: {{message}}"
++    "quota_refresh_failed": "“{{name}}” için Kota Yenilenemedi: {{message}}",
++    "error_status_fallback": "Kimlik bilgisi hatası",
++    "error_view_details": "Detaylar",
++    "error_click_to_inspect": "Hata detaylarını görmek için tıklayın",
++    "error_modal_title": "Hata detayları",
++    "error_modal_loading": "Hata detayları yükleniyor...",
++    "error_modal_load_failed": "Hata detayları yüklenemedi",
++    "error_modal_clear": "Geçmişi temizle",
++    "error_modal_clear_failed": "Hata geçmişi temizlenemedi",
++    "error_modal_current_section": "Güncel hata",
++    "error_modal_status": "Durum",
++    "error_modal_models_section": "Model hataları ({{count}})",
++    "error_modal_history_section": "Son başarısızlıklar ({{count}})",
++    "error_modal_empty_title": "Kayıtlı hata yok",
++    "error_modal_empty_desc": "Bu kimlik bilgisi için başarısız istekler ve belirteç yenileme hataları burada görünür.",
++    "error_modal_retry_after": "Yeniden deneme {{time}}",
++    "error_modal_cooldown_until": "Bekleme bitişi {{time}}",
++    "error_modal_view_raw_log": "Ham günlüğü gör",
++    "error_modal_hide_raw_log": "Ham günlüğü gizle",
++    "error_modal_raw_log_empty": "(boş günlük)",
++    "error_modal_raw_log_failed": "İstek günlüğü yüklenemedi",
++    "error_phase_execute": "İstek",
++    "error_phase_stream": "Akış",
++    "error_phase_prepare": "Hazırlık",
++    "error_phase_refresh": "Yenileme",
++    "error_phase_count_tokens": "Token sayımı"
+   },
+   "antigravity_subscription": {
+     "plan_unknown": "Bilinmiyor",
+diff --git a/src/i18n/locales/vi.json b/src/i18n/locales/vi.json
+index 51481fa..c296ab0 100644
+--- a/src/i18n/locales/vi.json
++++ b/src/i18n/locales/vi.json
+@@ -480,7 +480,32 @@
+     "policy_rules_hint": "Các quy tắc tùy chỉnh được ưu tiên theo thứ tự danh sách. Kế thừa hoặc danh sách trống sẽ sử dụng quy tắc kế thừa; điều này không vô hiệu hóa chúng. Mẫu biểu thức chính quy (Regex) dùng cú pháp của Go.",
+     "policy_retry_invalid": "Nhập một số nguyên an toàn không âm, hoặc chọn Kế thừa.",
+     "policy_aliases_invalid": "Nhập tên model và bí danh không để trống cho mỗi hàng mới hoặc đã chỉnh sửa.",
+-    "policy_rules_invalid": "Hoàn thành mỗi quy tắc đã chỉnh sửa với mã trạng thái dương, một hành động và ít nhất một điều kiện khớp không để trống."
++    "policy_rules_invalid": "Hoàn thành mỗi quy tắc đã chỉnh sửa với mã trạng thái dương, một hành động và ít nhất một điều kiện khớp không để trống.",
++    "error_status_fallback": "Lỗi thông tin xác thực",
++    "error_view_details": "Chi tiết",
++    "error_click_to_inspect": "Nhấn để xem chi tiết lỗi",
++    "error_modal_title": "Chi tiết lỗi",
++    "error_modal_loading": "Đang tải chi tiết lỗi...",
++    "error_modal_load_failed": "Không thể tải chi tiết lỗi",
++    "error_modal_clear": "Xóa lịch sử",
++    "error_modal_clear_failed": "Không thể xóa lịch sử lỗi",
++    "error_modal_current_section": "Lỗi hiện tại",
++    "error_modal_status": "Trạng thái",
++    "error_modal_models_section": "Lỗi theo mô hình ({{count}})",
++    "error_modal_history_section": "Lỗi gần đây ({{count}})",
++    "error_modal_empty_title": "Chưa có lịch sử lỗi",
++    "error_modal_empty_desc": "Các yêu cầu thất bại và lỗi làm mới token của tài khoản này sẽ được lưu tại đây.",
++    "error_modal_retry_after": "Thử lại sau {{time}}",
++    "error_modal_cooldown_until": "Chờ đến {{time}}",
++    "error_modal_view_raw_log": "Xem nhật ký gốc",
++    "error_modal_hide_raw_log": "Ẩn nhật ký gốc",
++    "error_modal_raw_log_empty": "(nhật ký trống)",
++    "error_modal_raw_log_failed": "Không thể tải nhật ký yêu cầu",
++    "error_phase_execute": "Yêu cầu",
++    "error_phase_stream": "Luồng",
++    "error_phase_prepare": "Chuẩn bị",
++    "error_phase_refresh": "Làm mới",
++    "error_phase_count_tokens": "Đếm token"
+   },
+   "antigravity_subscription": {
+     "plan_unknown": "Không rõ",
+diff --git a/src/i18n/locales/zh-CN.json b/src/i18n/locales/zh-CN.json
+index f211c4a..141f29e 100644
+--- a/src/i18n/locales/zh-CN.json
++++ b/src/i18n/locales/zh-CN.json
+@@ -478,7 +478,32 @@
+     "quota_refresh_single": "刷新额度",
+     "quota_refresh_hint": "仅刷新该认证文件的额度",
+     "quota_refresh_success": "已刷新 \"{{name}}\" 的额度",
+-    "quota_refresh_failed": "刷新 \"{{name}}\" 的额度失败：{{message}}"
++    "quota_refresh_failed": "刷新 \"{{name}}\" 的额度失败：{{message}}",
++    "error_status_fallback": "账户异常",
++    "error_view_details": "查看详情",
++    "error_click_to_inspect": "点击查看错误详情",
++    "error_modal_title": "错误详情",
++    "error_modal_loading": "正在加载错误详情...",
++    "error_modal_load_failed": "加载错误详情失败",
++    "error_modal_clear": "清空记录",
++    "error_modal_clear_failed": "清空错误记录失败",
++    "error_modal_current_section": "当前错误",
++    "error_modal_status": "状态",
++    "error_modal_models_section": "模型级错误（{{count}}）",
++    "error_modal_history_section": "最近失败记录（{{count}}）",
++    "error_modal_empty_title": "暂无持久化失败记录",
++    "error_modal_empty_desc": "该认证文件的上游请求失败与令牌刷新错误将自动记录在此处。",
++    "error_modal_retry_after": "重试时间 {{time}}",
++    "error_modal_cooldown_until": "冷却至 {{time}}",
++    "error_modal_view_raw_log": "查看原始日志",
++    "error_modal_hide_raw_log": "收起原始日志",
++    "error_modal_raw_log_empty": "（空日志）",
++    "error_modal_raw_log_failed": "加载原始请求日志失败",
++    "error_phase_execute": "请求",
++    "error_phase_stream": "流式",
++    "error_phase_prepare": "准备",
++    "error_phase_refresh": "刷新",
++    "error_phase_count_tokens": "Token 计数"
+   },
+   "antigravity_subscription": {
+     "plan_unknown": "未知",
+diff --git a/src/i18n/locales/zh-TW.json b/src/i18n/locales/zh-TW.json
+index efcf159..6212d1d 100644
+--- a/src/i18n/locales/zh-TW.json
++++ b/src/i18n/locales/zh-TW.json
+@@ -478,7 +478,32 @@
+     "quota_refresh_single": "重新整理配額",
+     "quota_refresh_hint": "僅重新整理該驗證檔案的配額",
+     "quota_refresh_success": "已重新整理「{{name}}」的配額",
+-    "quota_refresh_failed": "重新整理「{{name}}」的配額失敗：{{message}}"
++    "quota_refresh_failed": "重新整理「{{name}}」的配額失敗：{{message}}",
++    "error_status_fallback": "帳戶異常",
++    "error_view_details": "檢視詳情",
++    "error_click_to_inspect": "點擊檢視錯誤詳情",
++    "error_modal_title": "錯誤詳情",
++    "error_modal_loading": "正在載入錯誤詳情...",
++    "error_modal_load_failed": "載入錯誤詳情失敗",
++    "error_modal_clear": "清除記錄",
++    "error_modal_clear_failed": "清除錯誤記錄失敗",
++    "error_modal_current_section": "目前錯誤",
++    "error_modal_status": "狀態",
++    "error_modal_models_section": "模型層級錯誤（{{count}}）",
++    "error_modal_history_section": "最近失敗記錄（{{count}}）",
++    "error_modal_empty_title": "尚無持久化失敗記錄",
++    "error_modal_empty_desc": "此認證檔案的上游請求失敗與權杖重新整理錯誤將自動記錄於此。",
++    "error_modal_retry_after": "重試時間 {{time}}",
++    "error_modal_cooldown_until": "冷卻至 {{time}}",
++    "error_modal_view_raw_log": "檢視原始日誌",
++    "error_modal_hide_raw_log": "收合原始日誌",
++    "error_modal_raw_log_empty": "（空日誌）",
++    "error_modal_raw_log_failed": "載入原始請求日誌失敗",
++    "error_phase_execute": "請求",
++    "error_phase_stream": "串流",
++    "error_phase_prepare": "準備",
++    "error_phase_refresh": "重新整理",
++    "error_phase_count_tokens": "Token 計數"
+   },
+   "antigravity_subscription": {
+     "plan_unknown": "未知",
+diff --git a/src/services/api/authFiles.ts b/src/services/api/authFiles.ts
+index 5b320f5..0ff18d9 100644
+--- a/src/services/api/authFiles.ts
++++ b/src/services/api/authFiles.ts
+@@ -16,6 +16,10 @@ import {
+ } from '@/utils/recentRequests';
+ import { parseTimestampMs } from '@/utils/timestamp';
+ import { normalizeAuthFileCooldowns, normalizeCooldownTimestamp } from './authFileCooldowns';
++import {
++  normalizeAuthFileErrorSummary,
++  normalizeAuthFileRefreshError,
++} from './authFileErrors';
+ 
+ type AuthFileStatusResponse = { status: string; disabled: boolean };
+ export type AuthFileLookup = { name: string; authIndex?: string };
+@@ -285,6 +289,14 @@ const normalizeAuthFileEntry = (
+     readTextField(entry, 'quota_provider') || readTextField(entry, 'quotaProvider');
+   const quotaPluginId =
+     readTextField(entry, 'quota_plugin_id') || readTextField(entry, 'quotaPluginId');
++  const lastError = normalizeAuthFileErrorSummary(entry['last_error'] ?? entry.lastError);
++  const refreshError = normalizeAuthFileRefreshError(entry['refresh_error'] ?? entry.refreshError);
++  const recentErrorCount = readIntegerField(entry['recent_error_count'] ?? entry.recentErrorCount);
++  const requiresSignIn = readBooleanField(entry['requires_sign_in'] ?? entry.requiresSignIn);
++  const recoveryHint = readTextField(entry, 'recovery_hint') || readTextField(entry, 'recoveryHint');
++  const tosAppealUrl = readTextField(entry, 'tos_appeal_url') || readTextField(entry, 'tosAppealUrl');
++  const tosAppealUrlText =
++    readTextField(entry, 'tos_appeal_url_text') || readTextField(entry, 'tosAppealUrlText');
+ 
+   return {
+     ...entry,
+@@ -302,6 +314,13 @@ const normalizeAuthFileEntry = (
+     successCount: normalizeUsageTotal(entry.success),
+     failureCount: normalizeUsageTotal(entry.failed),
+     ...(statusMessage ? { statusMessage } : {}),
++    ...(lastError ? { lastError } : {}),
++    ...(refreshError ? { refreshError } : {}),
++    ...(recentErrorCount !== undefined && recentErrorCount >= 0 ? { recentErrorCount } : {}),
++    ...(requiresSignIn !== undefined ? { requiresSignIn } : {}),
++    ...(recoveryHint ? { recoveryHint } : {}),
++    ...(tosAppealUrl ? { tosAppealUrl } : {}),
++    ...(tosAppealUrlText ? { tosAppealUrlText } : {}),
+     ...(modified > 0 ? { modified } : {}),
+     priority,
+     weight,
+diff --git a/src/types/authFile.ts b/src/types/authFile.ts
+index 847ddb7..45d3035 100644
+--- a/src/types/authFile.ts
++++ b/src/types/authFile.ts
+@@ -39,6 +39,22 @@ export interface AuthFileCooldownSnapshot {
+   records: AuthFileCooldown[] | null;
+ }
+ 
++export interface AuthFileErrorSummary {
++  code?: string;
++  httpStatus?: number;
++  message: string;
++  model?: string;
++  phase?: string;
++  timestamp?: string;
++  retryable?: boolean;
++}
++
++export interface AuthFileRefreshError {
++  code?: string;
++  httpStatus?: number;
++  message: string;
++}
++
+ export interface AuthFileItem {
+   name: string;
+   siwcBindSupported?: boolean;
+@@ -67,6 +83,13 @@ export interface AuthFileItem {
+   unavailable?: boolean;
+   status?: string;
+   statusMessage?: string;
++  lastError?: AuthFileErrorSummary;
++  refreshError?: AuthFileRefreshError;
++  recentErrorCount?: number;
++  requiresSignIn?: boolean;
++  recoveryHint?: string;
++  tosAppealUrl?: string;
++  tosAppealUrlText?: string;
+   lastRefresh?: string | number;
+   modified?: number;
+   priority?: number;

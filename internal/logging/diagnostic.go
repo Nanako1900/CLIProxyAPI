@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"regexp"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/MoeForge/moego/regexp"
 )
 
 const (
@@ -21,7 +20,9 @@ var (
 	accessTokenExpiredLogPattern  = regexp.MustCompile(`(?i)access token expired`)
 	sensitiveLogAssignmentPattern = regexp.MustCompile(`(?i)(["']?(?:access[\s_-]*token|refresh[\s_-]*token|id[\s_-]*token|api[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|proxy[\s_-]*authorization|authorization|password|credential|token|secret)["']?\s*[:=]\s*)(?:(?:bearer|basic)\s+[^\s,;]+|"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s,;&}\]]+)`)
 	authorizationLogPattern       = regexp.MustCompile(`(?i)\b(bearer|basic)\s+[^\s,;]+`)
+	cookieLogAssignmentPattern    = regexp.MustCompile(`(?i)(["']?(?:set-cookie|cookie)["']?\s*[:=]\s*)(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\r\n,;&}\]]+)`)
 	urlUserinfoLogPattern         = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)[^/\s@]+@`)
+	urlSensitiveQueryLogPattern   = regexp.MustCompile(`(?i)([?&](?:code|state|access_token|refresh_token|id_token|token|api_key|key|secret|client_secret|password)=)[^&\s"'<>]+`)
 	diagnosticStatusPattern       = regexp.MustCompile(`(?i)\bstatus(?:\s+code)?\s*[:=]?\s*([1-5][0-9]{2})\b`)
 )
 
@@ -41,6 +42,7 @@ func SafeDiagnosticForLog(message string) string {
 		return ""
 	}
 	excerpt = urlUserinfoLogPattern.ReplaceAllString(excerpt, `${1}[REDACTED]@`)
+	excerpt = urlSensitiveQueryLogPattern.ReplaceAllString(excerpt, `${1}[REDACTED]`)
 	excerpt = sensitiveLogAssignmentPattern.ReplaceAllString(excerpt, `${1}"[REDACTED]"`)
 	excerpt = authorizationLogPattern.ReplaceAllString(excerpt, `${1} [REDACTED]`)
 
@@ -170,4 +172,38 @@ func truncateDiagnosticLogExcerpt(message string, sourceTruncated bool) string {
 		}
 	}
 	return output + "..."
+}
+
+const defaultErrorDetailRuneLimit = 4096
+
+// SafeDetailForErrorDisplay returns a bounded, redacted error detail suitable
+// for persisted per-account error inspection. Unlike SafeDiagnosticForLog it
+// preserves newlines and retains up to maxRunes (default 4096) for structured
+// upstream error payloads while redacting credentials, cookies, and URL userinfo.
+func SafeDetailForErrorDisplay(message string, maxRunes int) string {
+	if maxRunes <= 0 {
+		maxRunes = defaultErrorDetailRuneLimit
+	}
+	normalized := strings.ReplaceAll(message, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	normalized = strings.TrimSpace(normalized)
+	if normalized == "" {
+		return ""
+	}
+	scanLimit := maxRunes + 512
+	excerpt, sourceTruncated := diagnosticRunePrefix(normalized, scanLimit)
+	excerpt = urlUserinfoLogPattern.ReplaceAllString(excerpt, `${1}[REDACTED]@`)
+	excerpt = urlSensitiveQueryLogPattern.ReplaceAllString(excerpt, `${1}[REDACTED]`)
+	excerpt = sensitiveLogAssignmentPattern.ReplaceAllString(excerpt, `${1}"[REDACTED]"`)
+	excerpt = cookieLogAssignmentPattern.ReplaceAllString(excerpt, `${1}"[REDACTED]"`)
+	excerpt = authorizationLogPattern.ReplaceAllString(excerpt, `${1} [REDACTED]`)
+	excerpt = strings.TrimSpace(excerpt)
+	if excerpt == "" {
+		return ""
+	}
+	bounded, detailTruncated := diagnosticRunePrefix(excerpt, maxRunes)
+	if sourceTruncated || detailTruncated {
+		return strings.TrimRight(bounded, " \t\n") + "..."
+	}
+	return bounded
 }

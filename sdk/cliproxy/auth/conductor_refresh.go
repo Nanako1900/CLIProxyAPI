@@ -1512,10 +1512,14 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 					current.StatusMessage = "unauthorized (refresh token invalid)"
 				}
 				m.auths[id] = current
+				refreshSnapshot := current.Clone()
 				if m.scheduler != nil {
-					m.scheduler.upsertAuth(current.Clone())
+					m.scheduler.upsertAuth(refreshSnapshot)
 				}
 				m.mu.Unlock()
+				if !m.HomeEnabled() {
+					m.recordAuthRefreshError(ctx, refreshSnapshot, err, sanitizedRefreshErr)
+				}
 				m.queueRefreshUnschedule(id)
 				return nil, err
 			}
@@ -1671,9 +1675,20 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 				}
 			}
 			m.auths[id] = current
+			refreshSnapshot := current.Clone()
 			if m.scheduler != nil {
-				m.scheduler.upsertAuth(current.Clone())
+				m.scheduler.upsertAuth(refreshSnapshot)
 			}
+			m.mu.Unlock()
+			if !m.HomeEnabled() {
+				m.recordAuthRefreshError(ctx, refreshSnapshot, err, sanitizedRefreshErr)
+			}
+			if shouldReschedule {
+				m.queueRefreshReschedule(id)
+			} else if shouldUnschedule {
+				m.queueRefreshUnschedule(id)
+			}
+			return nil, err
 		}
 		m.mu.Unlock()
 		if shouldReschedule {
