@@ -112,3 +112,33 @@ func TestConfigV8GeminiUserAgentRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigV8UnrelatedPatchSucceedsAfterLegacyGeminiAutoStartupMigration(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	raw := []byte("config-version: 8\nserver: {port: 8317}\nupstream: {gemini: {header-defaults: {user-agent: auto}}}\n")
+	if errWrite := os.WriteFile(path, raw, 0600); errWrite != nil {
+		t.Fatal(errWrite)
+	}
+	cfg, errLoad := config.LoadConfig(path)
+	if errLoad != nil {
+		t.Fatalf("startup LoadConfig failed on legacy Gemini auto: %v", errLoad)
+	}
+	h := &Handler{cfg: cfg, configFilePath: path}
+	router := gin.New()
+	router.PATCH("/v8/management/config", h.ConfigV8)
+
+	// Unrelated save must succeed because startup migrated the legacy "auto" value on disk.
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/v8/management/config", strings.NewReader(`{"server":{"port":8318}}`)))
+	if res.Code != http.StatusOK {
+		t.Fatalf("unrelated PATCH after startup migration failed: %d %s", res.Code, res.Body)
+	}
+
+	// Explicitly writing Gemini "auto" via Management API must still be rejected.
+	resAuto := httptest.NewRecorder()
+	router.ServeHTTP(resAuto, httptest.NewRequest(http.MethodPatch, "/v8/management/config", strings.NewReader(`{"upstream":{"gemini":{"header-defaults":{"user-agent":"auto"}}}}`)))
+	if resAuto.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422 rejecting Gemini auto via Management API, got %d %s", resAuto.Code, resAuto.Body)
+	}
+}

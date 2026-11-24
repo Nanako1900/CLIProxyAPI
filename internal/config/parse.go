@@ -12,9 +12,23 @@ import (
 // ParseConfigBytes parses a YAML configuration payload into Config and applies the same
 // in-memory normalizations as LoadConfigOptional, without persisting any changes to disk.
 func ParseConfigBytes(data []byte) (*Config, error) {
-	parsed, err := validateStartupConfig(data, false)
+	return parseConfigBytesWithOptions(data, false)
+}
+
+// ParseStartupConfigBytes parses a YAML configuration payload during startup or remote
+// sync, clearing legacy Gemini "auto" header values with a warning so existing
+// deployments can boot cleanly while strict validation continues rejecting new writes.
+func ParseStartupConfigBytes(data []byte) (*Config, error) {
+	return parseConfigBytesWithOptions(data, true)
+}
+
+func parseConfigBytesWithOptions(data []byte, allowLegacyGeminiAuto bool) (*Config, error) {
+	parsed, err := validateStartupConfigWithOptions(data, false, allowLegacyGeminiAuto)
 	if err != nil {
 		return nil, err
+	}
+	if allowLegacyGeminiAuto {
+		warnClearedLegacyGeminiAuto(parsed.clearedLegacyGeminiAuto)
 	}
 	if errHash := parsed.hashManagementSecret(); errHash != nil {
 		return nil, errHash
@@ -39,8 +53,9 @@ func ParsePreparedConfigBytes(data []byte) (*Config, error) {
 }
 
 type startupConfig struct {
-	cfg  *Config
-	docs []*yaml.Node
+	cfg                     *Config
+	docs                    []*yaml.Node
+	clearedLegacyGeminiAuto []string
 }
 
 func standbyConfig() *Config {
@@ -53,9 +68,17 @@ func standbyConfig() *Config {
 // Decode errors and malformed YAML weights keep optional deployments in standby.
 // Runtime validation errors (including bcrypt's byte limit) still fail startup.
 func validateStartupConfig(data []byte, optional bool) (*startupConfig, error) {
+	return validateStartupConfigWithOptions(data, optional, false)
+}
+
+func validateStartupConfigWithOptions(data []byte, optional, allowLegacyGeminiAuto bool) (*startupConfig, error) {
 	docs, err := decodeConfigStream(data)
 	if err == nil && len(docs) == 0 {
 		err = fmt.Errorf("config payload is empty")
+	}
+	var clearedLegacyGeminiAuto []string
+	if err == nil && allowLegacyGeminiAuto && len(docs[0].Content) > 0 {
+		clearedLegacyGeminiAuto = stripLegacyGeminiAutoNodes(docs[0].Content[0])
 	}
 	if err == nil {
 		err = validateCredentialWeightsNode(docs[0].Content[0])
@@ -157,7 +180,7 @@ func validateStartupConfig(data []byte, optional bool) (*startupConfig, error) {
 		return nil, errResolvePluginsDir
 	}
 
-	return &startupConfig{cfg: &cfg, docs: docs}, nil
+	return &startupConfig{cfg: &cfg, docs: docs, clearedLegacyGeminiAuto: clearedLegacyGeminiAuto}, nil
 }
 
 func (cfg *Config) sanitizeStartupConfig() {
