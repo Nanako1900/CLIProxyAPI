@@ -61,8 +61,8 @@ function GeminiUALabSettings({
       return;
     }
     const result = parseUALabGeminiYaml(value);
-    if (result.error) {
-      setParseError(result.error);
+    if (!result.draft) {
+      setParseError(result.error ?? '');
       return;
     }
     setParseError('');
