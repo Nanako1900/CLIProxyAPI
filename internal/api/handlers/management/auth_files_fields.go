@@ -869,6 +869,7 @@ func (h *Handler) removeAuth(ctx context.Context, id string) {
 	}
 	if _, ok := h.authManager.GetByID(id); ok {
 		h.authManager.Remove(ctx, id)
+		h.authManager.ClearAuthErrorHistory(ctx, id)
 		return
 	}
 	authID := h.authIDForPath(id)
@@ -876,6 +877,7 @@ func (h *Handler) removeAuth(ctx context.Context, id string) {
 		return
 	}
 	h.authManager.Remove(ctx, authID)
+	h.authManager.ClearAuthErrorHistory(ctx, authID)
 }
 
 func (h *Handler) removeAuthsForPath(ctx context.Context, path string, fallbackID string) {

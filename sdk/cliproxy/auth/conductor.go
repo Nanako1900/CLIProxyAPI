@@ -80,6 +80,8 @@ type Result struct {
 	Model string
 	// RouteModel is the requested logical route model before alias resolution.
 	RouteModel string
+	// Phase optionally labels the execution stage ("execute", "stream", "prepare", "count_tokens", "refresh").
+	Phase string
 	// Success marks whether the execution succeeded.
 	Success bool
 	// CompletedResponse reports that the upstream execution produced a completed
@@ -202,6 +204,8 @@ type Manager struct {
 	store                     Store
 	cooldownStore             CooldownStateStore
 	pendingCooldownStateStore CooldownStateStore
+	errorHistoryOnce          sync.Once
+	errorHistory              *authErrorHistory
 	executors                 map[string]ProviderExecutor
 	executorRevisions         map[string]uint64
 	selector                  Selector

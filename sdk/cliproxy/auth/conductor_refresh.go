@@ -1819,10 +1819,14 @@ func (m *Manager) refreshAuthForRequestAtVersion(ctx context.Context, id, failed
 				}
 				m.auths[id] = current
 				m.notifyAuthChangeLocked(id)
+				refreshSnapshot := current.Clone()
 				if m.scheduler != nil {
-					m.scheduler.upsertAuth(current.Clone())
+					m.scheduler.upsertAuth(refreshSnapshot)
 				}
 				m.mu.Unlock()
+				if !m.HomeEnabled() {
+					m.recordAuthRefreshError(ctx, refreshSnapshot, err, sanitizedRefreshErr)
+				}
 				m.queueRefreshUnschedule(id)
 				return nil, err
 			}
@@ -1981,9 +1985,20 @@ func (m *Manager) refreshAuthForRequestAtVersion(ctx context.Context, id, failed
 			if shouldUnschedule || hasUnauthorizedAuthFailure(current) {
 				m.notifyAuthChangeLocked(id)
 			}
+			refreshSnapshot := current.Clone()
 			if m.scheduler != nil {
-				m.scheduler.upsertAuth(current.Clone())
+				m.scheduler.upsertAuth(refreshSnapshot)
 			}
+			m.mu.Unlock()
+			if !m.HomeEnabled() {
+				m.recordAuthRefreshError(ctx, refreshSnapshot, err, sanitizedRefreshErr)
+			}
+			if shouldReschedule {
+				m.queueRefreshReschedule(id)
+			} else if shouldUnschedule {
+				m.queueRefreshUnschedule(id)
+			}
+			return nil, err
 		}
 		m.mu.Unlock()
 		if shouldReschedule {
