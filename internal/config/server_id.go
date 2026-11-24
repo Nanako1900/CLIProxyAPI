@@ -100,7 +100,7 @@ func EnsureServerIDInConfigBytesWithOptional(data []byte, optional bool) ([]byte
 			return nil, "", errParse
 		}
 	}
-	updated, errUpdate := renderStartupConfig(data, parsed.docs, id, "", false)
+	updated, errUpdate := renderStartupConfig(data, parsed.docs, id, "", false, false)
 	if errUpdate != nil {
 		return nil, "", errUpdate
 	}

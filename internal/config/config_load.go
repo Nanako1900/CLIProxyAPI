@@ -52,10 +52,11 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 func loadConfigFile(configFile string, optional, forUpload bool) (cfg *Config, snapshot []byte, err error) {
 	err = withConfigFile(configFile, configWriteIfPossible, func(file *lockedConfigFile) error {
 		data := file.snapshot.data
-		parsed, errParse := validateStartupConfig(data, optional)
+		parsed, errParse := validateStartupConfigWithOptions(data, optional, true)
 		if errParse != nil {
 			return errParse
 		}
+		warnClearedLegacyGeminiAuto(parsed.clearedLegacyGeminiAuto)
 		cfg = parsed.cfg
 		if len(parsed.docs) == 0 {
 			return nil
@@ -107,10 +108,11 @@ func loadConfigFile(configFile string, optional, forUpload bool) (cfg *Config, s
 // PrepareConfigBytesForUploadWithOptional validates and rewrites remote or template
 // bytes without changing any file. A nil result and no error means optional standby.
 func PrepareConfigBytesForUploadWithOptional(data []byte, optional bool) ([]byte, error) {
-	parsed, errParse := validateStartupConfig(data, optional)
+	parsed, errParse := validateStartupConfigWithOptions(data, optional, true)
 	if errParse != nil || len(parsed.docs) == 0 {
 		return nil, errParse
 	}
+	warnClearedLegacyGeminiAuto(parsed.clearedLegacyGeminiAuto)
 	if parsed.cfg.ServerID == "" {
 		parsed.cfg.ServerID, errParse = newServerID()
 		if errParse != nil {
@@ -123,7 +125,7 @@ func PrepareConfigBytesForUploadWithOptional(data []byte, optional bool) ([]byte
 // IsPreparedConfigFromSeed reports whether prepared differs from seed only by
 // the automatic startup rewrites, including a generated ID and salted hash.
 func IsPreparedConfigFromSeed(seed, prepared []byte) bool {
-	original, errSeed := validateStartupConfig(seed, false)
+	original, errSeed := validateStartupConfigWithOptions(seed, false, true)
 	winner, errWinner := validateStartupConfig(prepared, false)
 	if errSeed != nil || errWinner != nil || len(original.docs) == 0 || len(winner.docs) == 0 || winner.cfg.ServerID == "" {
 		return false
@@ -141,7 +143,7 @@ func IsPreparedConfigFromSeed(seed, prepared []byte) bool {
 			return false
 		}
 	}
-	rendered, errRender := renderStartupConfig(seed, original.docs, id, hashed, true)
+	rendered, errRender := renderStartupConfig(seed, original.docs, id, hashed, true, len(original.clearedLegacyGeminiAuto) > 0)
 	return errRender == nil && bytes.Equal(rendered, prepared) && verifyConfigUpload(original.docs, prepared) == nil
 }
 
@@ -163,7 +165,8 @@ func prepareStartupConfig(data []byte, parsed *startupConfig, forUpload bool) ([
 		}
 		hashed = parsed.cfg.RemoteManagement.SecretKey
 	}
-	prepared, errPrepare := renderStartupConfig(data, parsed.docs, parsed.cfg.ServerID, hashed, true)
+	forceRewrite := len(parsed.clearedLegacyGeminiAuto) > 0
+	prepared, errPrepare := renderStartupConfig(data, parsed.docs, parsed.cfg.ServerID, hashed, true, forceRewrite)
 	if errPrepare != nil {
 		return nil, errPrepare
 	}
@@ -173,7 +176,7 @@ func prepareStartupConfig(data []byte, parsed *startupConfig, forUpload bool) ([
 		}
 		// Do not erase the evidence identifying a retained plaintext value.
 		// Otherwise a subsequent upload could mistake it for an unrelated value.
-		prepared, errPrepare = renderStartupConfig(data, parsed.docs, parsed.cfg.ServerID, "", false)
+		prepared, errPrepare = renderStartupConfig(data, parsed.docs, parsed.cfg.ServerID, "", false, forceRewrite)
 		if errPrepare != nil {
 			return nil, errPrepare
 		}
@@ -183,11 +186,11 @@ func prepareStartupConfig(data []byte, parsed *startupConfig, forUpload bool) ([
 
 var managementSecretPaths = [][]string{{"management", "secret-key"}, {"remote-management", "secret-key"}}
 
-func renderStartupConfig(data []byte, docs []*yaml.Node, id, hashed string, clean bool) ([]byte, error) {
+func renderStartupConfig(data []byte, docs []*yaml.Node, id, hashed string, clean, forceRewrite bool) ([]byte, error) {
 	doc := deepCopyNode(docs[0])
 	root := doc.Content[0]
 	previous := effectiveConfigValue(root, serverIDPath...)
-	changed := previous == nil || previous.Value != id
+	changed := forceRewrite || previous == nil || previous.Value != id
 	if changed {
 		setConfigScalar(root, serverIDPath, id)
 	}

@@ -3,6 +3,9 @@ package config
 import (
 	"fmt"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 )
 
 // ValidUserAgent accepts empty defaults, "auto", and printable HTTP identities.
@@ -97,4 +100,188 @@ func validateUserAgentHeaders(headers map[string]string, rejectConflicts bool) e
 		}
 	}
 	return nil
+}
+
+var legacyGeminiAutoScalarPaths = []string{
+	"upstream.gemini.header-defaults.user-agent",
+	"upstream.gemini.header-defaults.api-client",
+	"gemini-header-defaults.user-agent",
+	"gemini-header-defaults.api-client",
+}
+
+func isAutoScalarNode(node *yaml.Node) bool {
+	resolved := derefConfigNode(node)
+	return resolved != nil && resolved.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(resolved.Value), "auto")
+}
+
+func clearScalarNodeToEmptyString(node *yaml.Node) {
+	node.Kind = yaml.ScalarNode
+	node.Tag = "!!str"
+	node.Value = ""
+	node.Style = 0
+	node.Alias = nil
+	node.Content = nil
+}
+
+func headersNodeHasAutoUserAgent(node *yaml.Node) bool {
+	resolved := derefConfigNode(node)
+	if resolved == nil || resolved.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(resolved.Content); i += 2 {
+		k := resolved.Content[i]
+		v := resolved.Content[i+1]
+		if k.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(k.Value), "User-Agent") && isAutoScalarNode(v) {
+			return true
+		}
+	}
+	return false
+}
+
+func stripAutoUserAgentFromHeaders(parent *yaml.Node) bool {
+	if parent == nil || parent.Kind != yaml.MappingNode {
+		return false
+	}
+	idx := findMapKeyIndex(parent, "headers")
+	if idx < 0 || idx+1 >= len(parent.Content) {
+		return false
+	}
+	headersNode := parent.Content[idx+1]
+	if !headersNodeHasAutoUserAgent(headersNode) {
+		return false
+	}
+	if headersNode.Kind == yaml.AliasNode {
+		headersNode = deepCopyNode(derefConfigNode(headersNode))
+		parent.Content[idx+1] = headersNode
+	}
+	filtered := make([]*yaml.Node, 0, len(headersNode.Content))
+	for i := 0; i+1 < len(headersNode.Content); i += 2 {
+		k := headersNode.Content[i]
+		v := headersNode.Content[i+1]
+		if k.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(k.Value), "User-Agent") && isAutoScalarNode(v) {
+			continue
+		}
+		filtered = append(filtered, k, v)
+	}
+	headersNode.Content = filtered
+	return true
+}
+
+func ensureWritableMappingNode(slot **yaml.Node) *yaml.Node {
+	if slot == nil || *slot == nil {
+		return nil
+	}
+	if (*slot).Kind == yaml.AliasNode {
+		resolved := derefConfigNode(*slot)
+		if resolved == nil || resolved.Kind != yaml.MappingNode {
+			return nil
+		}
+		*slot = deepCopyNode(resolved)
+	}
+	if (*slot).Kind != yaml.MappingNode {
+		return nil
+	}
+	return *slot
+}
+
+// stripLegacyGeminiAutoNodes clears deprecated Gemini "auto" User-Agent / api-client
+// values from a startup YAML document so existing deployments boot cleanly instead of
+// crash-looping after Gemini switched to pasted UALab profiles.
+func stripLegacyGeminiAutoNodes(root *yaml.Node) []string {
+	if root == nil {
+		return nil
+	}
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
+		root = root.Content[0]
+	}
+	if root.Kind != yaml.MappingNode {
+		return nil
+	}
+
+	var cleared []string
+	var expanded *yaml.Node
+	for _, path := range legacyGeminiAutoScalarPaths {
+		if node := yamlPath(root, path); node != nil {
+			if isAutoScalarNode(node) {
+				clearScalarNodeToEmptyString(node)
+				cleared = append(cleared, path)
+			}
+			continue
+		}
+		if expanded == nil {
+			expanded = expandConfigAliases(root)
+		}
+		if node := yamlPath(expanded, path); isAutoScalarNode(node) {
+			setYAMLPath(root, path, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: ""})
+			cleared = append(cleared, path)
+		}
+	}
+
+	for _, provider := range []string{"gemini", "interactions", "vertex"} {
+		groups := yamlPath(root, "api-keys."+provider)
+		if groups == nil || groups.Kind != yaml.SequenceNode {
+			continue
+		}
+		for i := range groups.Content {
+			group := derefConfigNode(groups.Content[i])
+			if group == nil || group.Kind != yaml.MappingNode {
+				continue
+			}
+			if idx := findMapKeyIndex(group, "headers"); idx >= 0 && idx+1 < len(group.Content) && headersNodeHasAutoUserAgent(group.Content[idx+1]) {
+				writable := ensureWritableMappingNode(&groups.Content[i])
+				if stripAutoUserAgentFromHeaders(writable) {
+					cleared = append(cleared, fmt.Sprintf("api-keys.%s[%d].headers.User-Agent", provider, i))
+				}
+				group = writable
+			}
+			keys := yamlPath(group, "keys")
+			if keys == nil || keys.Kind != yaml.SequenceNode {
+				continue
+			}
+			for j := range keys.Content {
+				keyNode := derefConfigNode(keys.Content[j])
+				if keyNode == nil || keyNode.Kind != yaml.MappingNode {
+					continue
+				}
+				if idx := findMapKeyIndex(keyNode, "headers"); idx >= 0 && idx+1 < len(keyNode.Content) && headersNodeHasAutoUserAgent(keyNode.Content[idx+1]) {
+					writableGroup := ensureWritableMappingNode(&groups.Content[i])
+					writableKeys := yamlPath(writableGroup, "keys")
+					if writableKeys != nil && j < len(writableKeys.Content) {
+						writableKey := ensureWritableMappingNode(&writableKeys.Content[j])
+						if stripAutoUserAgentFromHeaders(writableKey) {
+							cleared = append(cleared, fmt.Sprintf("api-keys.%s[%d].keys[%d].headers.User-Agent", provider, i, j))
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for _, legacyField := range []string{"gemini-api-key", "interactions-api-key", "vertex-api-key"} {
+		seq := yamlPath(root, legacyField)
+		if seq == nil || seq.Kind != yaml.SequenceNode {
+			continue
+		}
+		for i := range seq.Content {
+			item := derefConfigNode(seq.Content[i])
+			if item == nil || item.Kind != yaml.MappingNode {
+				continue
+			}
+			if idx := findMapKeyIndex(item, "headers"); idx >= 0 && idx+1 < len(item.Content) && headersNodeHasAutoUserAgent(item.Content[idx+1]) {
+				writable := ensureWritableMappingNode(&seq.Content[i])
+				if stripAutoUserAgentFromHeaders(writable) {
+					cleared = append(cleared, fmt.Sprintf("%s[%d].headers.User-Agent", legacyField, i))
+				}
+			}
+		}
+	}
+
+	return cleared
+}
+
+func warnClearedLegacyGeminiAuto(cleared []string) {
+	if len(cleared) == 0 {
+		return
+	}
+	log.Warnf("cleared legacy Gemini \"auto\" setting(s) (%s) during startup; paste a %s YAML profile to configure Gemini headers", strings.Join(cleared, ", "), UALabGeneratedMarker)
 }

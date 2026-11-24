@@ -383,7 +383,7 @@ func run() (exitStatus int) {
 			return 1
 		}
 
-		parsed, errParseConfig := config.ParseConfigBytes(raw)
+		parsed, errParseConfig := config.ParseStartupConfigBytes(raw)
 		if errParseConfig != nil {
 			log.Errorf("failed to parse config payload from home: %v", errParseConfig)
 			return 1
@@ -893,7 +893,7 @@ func loadPluginBootstrapConfig(path string) *config.Config {
 		cfg.NormalizePluginsConfig()
 		return cfg
 	}
-	cfg, errParseConfig := config.ParseConfigBytes(raw)
+	cfg, errParseConfig := config.ParseStartupConfigBytes(raw)
 	if errParseConfig != nil {
 		log.Warnf("failed to parse plugin bootstrap config: %v", errParseConfig)
 		cfg = &config.Config{}

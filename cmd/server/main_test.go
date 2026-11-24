@@ -238,3 +238,21 @@ func TestLoadPluginBootstrapConfigDoesNotRewriteFile(t *testing.T) {
 		t.Fatalf("plugin bootstrap changed the config: %q, %v", got, errRead)
 	}
 }
+
+func TestLoadPluginBootstrapConfigAcceptsLegacyGeminiAuto(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	raw := []byte("config-version: 8\nserver:\n  port: 8317\nplugins:\n  enabled: false\nupstream:\n  gemini:\n    header-defaults:\n      user-agent: auto\n")
+	if errCreate := config.CreateConfigFile(path, raw); errCreate != nil {
+		t.Fatal(errCreate)
+	}
+	cfg := loadPluginBootstrapConfig(path)
+	if cfg.Port != 8317 {
+		t.Fatalf("plugin bootstrap config port = %d, want 8317", cfg.Port)
+	}
+	if cfg.Plugins.Enabled {
+		t.Fatalf("plugin bootstrap config lost plugins.enabled=false")
+	}
+	if cfg.GeminiHeaderDefaults.UserAgent != "" {
+		t.Fatalf("expected cleared Gemini User-Agent, got %q", cfg.GeminiHeaderDefaults.UserAgent)
+	}
+}

@@ -129,3 +129,157 @@ func TestGeminiUserAgentRejectsConflictingGroupEvenWhenShadowed(t *testing.T) {
 		t.Fatalf("conflict in group headers was accepted: %v", err)
 	}
 }
+
+func TestStartupLoadMigratesLegacyGeminiAutoAndPreservesOtherProviders(t *testing.T) {
+	raw := []byte(`config-version: 8
+server:
+  port: 8317
+  server-id: 11111111-1111-4111-8111-111111111111
+oauth:
+  providers:
+    codex:
+      header-defaults:
+        user-agent: auto
+upstream:
+  claude:
+    header-defaults:
+      user-agent: auto
+  gemini:
+    header-defaults:
+      user-agent: auto
+      api-client: AUTO
+api-keys:
+  gemini:
+    - name: group-1
+      headers:
+        User-Agent: auto
+        X-Keep: "1"
+      keys:
+        - api-key: key-inherit
+        - api-key: key-1
+          headers:
+            user-agent: " AUTO "
+            X-Key: "2"
+  interactions:
+    - name: inter-1
+      keys:
+        - api-key: inter-key
+          headers:
+            User-Agent: auto
+  vertex:
+    - name: vertex-1
+      headers:
+        User-Agent: auto
+      keys:
+        - api-key: vertex-key
+`)
+	// Strict parsing and V8 validation must continue rejecting Gemini "auto".
+	if _, err := ParseConfigBytes(raw); err == nil || !strings.Contains(err.Error(), "does not support \"auto\"") {
+		t.Fatalf("ParseConfigBytes should reject legacy Gemini auto, got %v", err)
+	}
+	if err := ValidateV8Config(raw); err == nil || !strings.Contains(err.Error(), "does not support \"auto\"") {
+		t.Fatalf("ValidateV8Config should reject legacy Gemini auto, got %v", err)
+	}
+
+	// Startup in-memory parsing (plugin bootstrap / Home config) must strip legacy Gemini auto.
+	bootCfg, errBoot := ParseStartupConfigBytes(raw)
+	if errBoot != nil {
+		t.Fatalf("ParseStartupConfigBytes() error = %v", errBoot)
+	}
+	if bootCfg.GeminiHeaderDefaults.UserAgent != "" || bootCfg.GeminiHeaderDefaults.APIClient != "" {
+		t.Fatalf("expected cleared GeminiHeaderDefaults, got %#v", bootCfg.GeminiHeaderDefaults)
+	}
+	if bootCfg.CodexHeaderDefaults.UserAgent != "auto" || bootCfg.ClaudeHeaderDefaults.UserAgent != "auto" {
+		t.Fatalf("expected Codex/Claude auto preserved, got codex=%q claude=%q", bootCfg.CodexHeaderDefaults.UserAgent, bootCfg.ClaudeHeaderDefaults.UserAgent)
+	}
+
+	// File startup loading must strip legacy Gemini auto and persist the migrated config.
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if errWrite := os.WriteFile(path, raw, 0600); errWrite != nil {
+		t.Fatal(errWrite)
+	}
+	cfg, errLoad := LoadConfig(path)
+	if errLoad != nil {
+		t.Fatalf("LoadConfig() error = %v", errLoad)
+	}
+	if cfg.GeminiHeaderDefaults.UserAgent != "" || cfg.GeminiHeaderDefaults.APIClient != "" {
+		t.Fatalf("expected cleared GeminiHeaderDefaults after LoadConfig, got %#v", cfg.GeminiHeaderDefaults)
+	}
+	if cfg.CodexHeaderDefaults.UserAgent != "auto" || cfg.ClaudeHeaderDefaults.UserAgent != "auto" {
+		t.Fatalf("expected Codex/Claude auto preserved after LoadConfig, got codex=%q claude=%q", cfg.CodexHeaderDefaults.UserAgent, cfg.ClaudeHeaderDefaults.UserAgent)
+	}
+	if len(cfg.GeminiKey) != 2 || cfg.GeminiKey[0].Headers["X-Keep"] != "1" || cfg.GeminiKey[1].Headers["X-Key"] != "2" {
+		t.Fatalf("unexpected GeminiKey headers after migration: %#v", cfg.GeminiKey)
+	}
+	for _, key := range cfg.GeminiKey {
+		for name := range key.Headers {
+			if strings.EqualFold(name, "User-Agent") {
+				t.Fatalf("expected Gemini User-Agent auto header removed, got %#v", key.Headers)
+			}
+		}
+	}
+
+	// Persisted file on disk must now pass strict ParseConfigBytes and ValidateV8Config.
+	migrated, errRead := os.ReadFile(path)
+	if errRead != nil {
+		t.Fatal(errRead)
+	}
+	if errStrict := ValidateV8Config(migrated); errStrict != nil {
+		t.Fatalf("migrated config.yaml failed ValidateV8Config: %v\n%s", errStrict, string(migrated))
+	}
+	if _, errStrict := ParseConfigBytes(migrated); errStrict != nil {
+		t.Fatalf("migrated config.yaml failed ParseConfigBytes: %v\n%s", errStrict, string(migrated))
+	}
+
+	// Remote upload preparation & seed comparison must also support legacy Gemini auto.
+	prepared, errPrepare := PrepareConfigBytesForUploadWithOptional(raw, false)
+	if errPrepare != nil {
+		t.Fatalf("PrepareConfigBytesForUploadWithOptional() error = %v", errPrepare)
+	}
+	if !IsPreparedConfigFromSeed(raw, prepared) {
+		t.Fatalf("IsPreparedConfigFromSeed returned false for migrated legacy Gemini auto config")
+	}
+}
+
+func TestStartupLoadLegacyKeysAndReadOnlyFile(t *testing.T) {
+	raw := []byte(`port: 8317
+gemini-header-defaults:
+  user-agent: auto
+  api-client: auto
+gemini-api-key:
+  - api-key: g-key
+    headers:
+      User-Agent: auto
+      X-Trace: ok
+`)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if errWrite := os.WriteFile(path, raw, 0444); errWrite != nil {
+		t.Fatal(errWrite)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0600) })
+
+	cfg, errLoad := LoadConfigOptional(path, false)
+	if errLoad != nil {
+		t.Fatalf("LoadConfigOptional() on read-only legacy config failed: %v", errLoad)
+	}
+	if cfg.GeminiHeaderDefaults.UserAgent != "" || cfg.GeminiHeaderDefaults.APIClient != "" {
+		t.Fatalf("expected cleared legacy GeminiHeaderDefaults, got %#v", cfg.GeminiHeaderDefaults)
+	}
+	if len(cfg.GeminiKey) != 1 || cfg.GeminiKey[0].Headers["X-Trace"] != "ok" {
+		t.Fatalf("unexpected legacy GeminiKey headers: %#v", cfg.GeminiKey)
+	}
+	for name := range cfg.GeminiKey[0].Headers {
+		if strings.EqualFold(name, "User-Agent") {
+			t.Fatalf("expected legacy Gemini User-Agent auto header removed, got %#v", cfg.GeminiKey[0].Headers)
+		}
+	}
+
+	// Non-ASCII invalid User-Agent must still fail even on startup load.
+	invalidPath := filepath.Join(t.TempDir(), "invalid.yaml")
+	if errWrite := os.WriteFile(invalidPath, []byte("upstream:\n  gemini:\n    header-defaults:\n      user-agent: \"bad\\nheader\"\n"), 0600); errWrite != nil {
+		t.Fatal(errWrite)
+	}
+	if _, errInvalid := LoadConfig(invalidPath); errInvalid == nil || !strings.Contains(errInvalid.Error(), "printable ASCII") {
+		t.Fatalf("expected invalid non-ASCII User-Agent to fail startup load, got %v", errInvalid)
+	}
+}
