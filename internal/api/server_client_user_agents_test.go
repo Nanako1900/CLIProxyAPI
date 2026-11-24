@@ -58,6 +58,7 @@ func TestClientUserAgentCaptureAfterAuthentication(t *testing.T) {
 	// Simulate executor normalization after the capture middleware.
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Set("accessProvider", "test")
 	c.Request.Header.Set("User-Agent", "claude-cli/2.1.318")
 	s.captureClientUserAgent(c)
 	c.Request.Header.Set("User-Agent", "claude-cli/0.0.1")
@@ -66,14 +67,64 @@ func TestClientUserAgentCaptureAfterAuthentication(t *testing.T) {
 	}
 }
 
-func TestGeminiCLIStreamObservedInUserAgentCatalog(t *testing.T) {
+func TestGeminiCaptureOnAuthenticatedRouteGroups(t *testing.T) {
+	t.Setenv("MANAGEMENT_PASSWORD", "test-management-key")
+	const ua = "GeminiCLI-tui/0.70.0/gemini-2.5-flash (darwin; arm64; terminal)"
+	request := func(s *Server, method, path, key string, status int, count uint64) string {
+		t.Helper()
+		req := httptest.NewRequest(method, path, nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		if key != "" {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
+		req.Header.Set("User-Agent", ua)
+		resp := httptest.NewRecorder()
+		s.engine.ServeHTTP(resp, req)
+		if resp.Code != status {
+			t.Fatalf("%s %s status = %d, want %d", method, path, resp.Code, status)
+		}
+		var observed uint64
+		entries := s.clientUserAgents.List("gemini")
+		if len(entries) == 1 {
+			observed = entries[0].Count
+		}
+		if len(entries) > 1 || observed != count {
+			t.Errorf("%s %s: want %d observations, got %+v", method, path, count, entries)
+		}
+		return resp.Body.String()
+	}
+	s := newTestServer(t)
+	pooled := newTestServerWithConfig(t, testServerPoolConfig())
+	for _, server := range []*Server{s, pooled} {
+		t.Cleanup(func() {
+			if err := server.clientUserAgents.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	request(s, http.MethodGet, "/healthz", "test-key", http.StatusOK, 0)
+	request(s, http.MethodGet, "/v8/management/client-user-agents?provider=gemini", "test-management-key", http.StatusOK, 0)
+	request(s, http.MethodGet, "/muse-code/models", "invalid", http.StatusUnauthorized, 0)
+	request(s, http.MethodGet, "/muse-code/models", "test-key", http.StatusOK, 1)
+	secret := request(s, http.MethodPost, "/v1/realtime/client_secrets", "test-key", http.StatusOK, 2)
+	request(s, http.MethodGet, "/v1/realtime", ojson.Get(secret, "value").String(), http.StatusUpgradeRequired, 3)
+	// The video handler rejects the empty request body after authentication.
+	request(s, http.MethodPost, "/openai/v1/videos", "test-key", http.StatusBadRequest, 4)
+	s.accessManager.SetProviders(nil)
+	request(s, http.MethodGet, "/muse-code/models", "", http.StatusOK, 4)
+	request(pooled, http.MethodGet, "/pools/premium/v1beta/models", "pool-client-key", http.StatusForbidden, 0)
+	request(pooled, http.MethodGet, "/pools/basic/v1beta/models", "pool-client-key", http.StatusOK, 1)
+}
+
+func TestGeminiStreamObservedInUserAgentCatalog(t *testing.T) {
 	const model = "gemini-2.5-flash"
 	t.Setenv("MANAGEMENT_PASSWORD", "test-management-key")
-	for _, ua := range []string{
-		"GeminiCLI-tui/0.70.0/gemini-2.5-flash (darwin; arm64; terminal)",
-		"GeminiCLI-tui/0.70.0/gemini-2.5-flash (darwin; arm64; terminal) google-api-nodejs-client/10.9.0",
+	for _, client := range []struct{ name, ua, version, kind string }{
+		{"CLI", "GeminiCLI-tui/0.70.0/gemini-2.5-flash (darwin; arm64; terminal)", "0.70.0", ""},
+		{"CLI with auth library", "GeminiCLI-tui/0.70.0/gemini-2.5-flash (darwin; arm64; terminal) google-api-nodejs-client/10.9.0", "0.70.0", ""},
+		{"Go SDK via agy", "google-genai-sdk/1.79.1 gl-go/go1.28-20261102-RC01 cl/1012564305 +298f53e483 X:fieldtrack,boringcrypto,nogolistexportnewformat", "1.79.1", "google-genai-go"},
 	} {
-		t.Run(ua, func(t *testing.T) {
+		t.Run(client.name, func(t *testing.T) {
 			s := newTestServer(t)
 			t.Cleanup(func() {
 				if err := s.clientUserAgents.Close(); err != nil {
@@ -91,18 +142,19 @@ func TestGeminiCLIStreamObservedInUserAgentCatalog(t *testing.T) {
 			t.Cleanup(func() { models.UnregisterClient(credential.ID) })
 
 			for _, tc := range []struct {
-				key    string
-				status int
+				key, ua string
+				status  int
 			}{
-				{"wrong-key", http.StatusUnauthorized},
-				{"test-key", http.StatusOK},
-				{"test-key", http.StatusOK},
+				{"wrong-key", client.ua, http.StatusUnauthorized},
+				{"test-key", "uncatalogued-client", http.StatusOK},
+				{"test-key", client.ua, http.StatusOK},
+				{"test-key", client.ua, http.StatusOK},
 			} {
 				req := httptest.NewRequest(http.MethodPost, "/v1beta/models/"+model+":streamGenerateContent?alt=sse", strings.NewReader(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("X-Goog-Api-Key", tc.key)
-				req.Header.Set("X-Goog-Api-Client", "gl-node/22.0.0")
-				req.Header.Set("User-Agent", ua)
+				req.Header.Set("X-Goog-Api-Client", tc.ua)
+				req.Header.Set("User-Agent", tc.ua)
 				rec := httptest.NewRecorder()
 				s.engine.ServeHTTP(rec, req)
 				if rec.Code != tc.status {
@@ -115,6 +167,10 @@ func TestGeminiCLIStreamObservedInUserAgentCatalog(t *testing.T) {
 			req.Header.Set("Authorization", "Bearer test-management-key")
 			rec := httptest.NewRecorder()
 			s.engine.ServeHTTP(rec, req)
+			stats := ojson.Get(rec.Body.String(), "captureStats")
+			if stats.Get("inspected").Int() != 3 || stats.Get("unrecognized").Int() != 1 || strings.Contains(rec.Body.String(), "uncatalogued-client") {
+				t.Errorf("want three authenticated requests inspected and one unrecognized UA counted, got %s", rec.Body.String())
+			}
 			items := ojson.Get(rec.Body.String(), "items").Array()
 			if rec.Code != http.StatusOK || len(items) != 1 {
 				t.Fatalf("catalog status = %d, want one Gemini sample: %s", rec.Code, rec.Body.String())
@@ -123,11 +179,11 @@ func TestGeminiCLIStreamObservedInUserAgentCatalog(t *testing.T) {
 			if !entry.Get("observed").Bool() || entry.Get("imported").Bool() || entry.Get("count").Int() != 2 {
 				t.Errorf("want two observations and no imports, got %s", entry.Raw)
 			}
-			if entry.Get("provider").String() != "gemini" || entry.Get("version").String() != "0.70.0" {
-				t.Errorf("want Gemini CLI version 0.70.0, got %s", entry.Raw)
+			if entry.Get("provider").String() != "gemini" || entry.Get("version").String() != client.version || entry.Get("clientKind").String() != client.kind {
+				t.Errorf("want Gemini version %s and kind %q, got %s", client.version, client.kind, entry.Raw)
 			}
 			headers := entry.Get("headers").Map()
-			if len(headers) != 1 || headers["User-Agent"].String() != ua {
+			if len(headers) != 1 || headers["User-Agent"].String() != client.ua {
 				t.Errorf("want only the exact incoming User-Agent, got %s", entry.Get("headers").Raw)
 			}
 		})
@@ -172,6 +228,10 @@ func TestClientUserAgentManagementContract(t *testing.T) {
 	request(http.MethodPost, gemini, `{"headers":"User-Agent: codex/1.2.3"}`, key, http.StatusUnprocessableEntity)
 	request(http.MethodPost, gemini, `{"headers":"User-Agent: GeminiCLI/1.2.3/gemini-pro (linux; arm64)\nX-Goog-Api-Client: private"}`, key, http.StatusOK)
 	result := request(http.MethodGet, gemini, "", key, http.StatusOK)
+	stats := ojson.Get(result, "captureStats")
+	if !stats.Get("inspected").Exists() || !stats.Get("unrecognized").Exists() || stats.Get("inspected").Int() != 0 || stats.Get("unrecognized").Int() != 0 {
+		t.Errorf("management requests and imports should leave both capture counters at zero, got %s", result)
+	}
 	if ojson.Get(result, "items.0.version").String() != "1.2.3" || strings.Contains(result, "private") {
 		t.Fatalf("unexpected Gemini list: %s", result)
 	}
@@ -204,6 +264,7 @@ func TestClientUserAgentManagementContract(t *testing.T) {
 	request(http.MethodGet, endpoint, "", key, http.StatusNotFound)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set("accessProvider", "test")
 	c.Request.Header.Set("User-Agent", "claude-cli/3.0.0")
 	s.captureClientUserAgent(c)
 	if len(s.clientUserAgents.List("claude")) != 0 {

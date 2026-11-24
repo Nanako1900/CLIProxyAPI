@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   clientProfileDraft,
   extractIdentityHeaders,
+  geminiUserAgentLabels,
   userAgentDraft,
 } from '../src/features/config/clientUserAgents';
 import type { ClientUserAgent } from '../src/services/api/clientUserAgents';
@@ -60,6 +61,29 @@ describe('client UA settings', () => {
     expect(userAgentDraft('claude', 'auto')).toEqual({ claudeHeaderUserAgent: 'auto' });
     expect(userAgentDraft('codex', '')).toEqual({ codexHeaderUserAgent: '' });
     expect(userAgentDraft('codex', 'codex/1.2.3')).toEqual({ codexHeaderUserAgent: 'codex/1.2.3' });
+  });
+
+  test('identifies Go SDK sample versions separately from legacy Gemini CLI sample versions', () => {
+    const cli: ClientUserAgent = {
+      ...sample,
+      provider: 'gemini',
+      version: '0.70.0',
+      headers: { 'User-Agent': 'GeminiCLI/0.70.0/gemini-flash' },
+    };
+    const sdkUserAgent =
+      'google-genai-sdk/1.79.1 gl-go/go1.28-20261102-RC01 cl/1012564305 +298f53e483 X:fieldtrack,boringcrypto,nogolistexportnewformat';
+    const sdk: ClientUserAgent = {
+      ...cli,
+      clientKind: 'google-genai-go',
+      version: '1.79.1',
+      headers: { 'User-Agent': sdkUserAgent },
+    };
+    expect(geminiUserAgentLabels(cli)).toEqual({ client: 'gemini_cli', version: 'client_version' });
+    expect(geminiUserAgentLabels(sdk)).toEqual({ client: 'gemini_go_sdk', version: 'sdk_version' });
+    expect(clientProfileDraft(sdk)).toEqual({ geminiHeaderUserAgent: sdkUserAgent });
+    expect(extractIdentityHeaders(`User-Agent: ${sdkUserAgent}`, 'gemini')).toBe(
+      `User-Agent: ${sdkUserAgent}`
+    );
   });
 
   test('Gemini imports and applies only User-Agent', () => {

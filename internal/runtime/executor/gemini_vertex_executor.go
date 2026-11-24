@@ -943,7 +943,7 @@ func (e *GeminiVertexExecutor) executeStreamWithServiceAccount(ctx context.Conte
 			}
 			for i := range lines {
 				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: lines[i]}:
+				case out <- helps.TranslatedClaudeStreamChunk(responseFormat, lines[i], streamErr):
 					if len(lines[i]) > 0 {
 						zeroOutputGuard.MarkEmitted()
 					}
@@ -1121,7 +1121,7 @@ func (e *GeminiVertexExecutor) executeStreamWithServiceAccount(ctx context.Conte
 		commitReplay()
 		for i := range lines {
 			select {
-			case out <- cliproxyexecutor.StreamChunk{Payload: lines[i]}:
+			case out <- helps.TranslatedClaudeStreamChunk(responseFormat, lines[i], streamErr):
 			case <-ctx.Done():
 				return
 			}
@@ -1300,7 +1300,7 @@ func (e *GeminiVertexExecutor) executeStreamWithAPIKey(ctx context.Context, auth
 			}
 			for i := range lines {
 				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: lines[i]}:
+				case out <- helps.TranslatedClaudeStreamChunk(responseFormat, lines[i], streamErr):
 					if len(lines[i]) > 0 {
 						zeroOutputGuard.MarkEmitted()
 					}
@@ -1478,7 +1478,7 @@ func (e *GeminiVertexExecutor) executeStreamWithAPIKey(ctx context.Context, auth
 		commitReplay()
 		for i := range lines {
 			select {
-			case out <- cliproxyexecutor.StreamChunk{Payload: lines[i]}:
+			case out <- helps.TranslatedClaudeStreamChunk(responseFormat, lines[i], streamErr):
 			case <-ctx.Done():
 				return
 			}

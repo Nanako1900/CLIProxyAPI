@@ -149,6 +149,69 @@ func TestAccountPoolsRetryDoesNotEscape(t *testing.T) {
 	}
 }
 
+func TestAccountPoolsRecheckGrantAfterUnauthorizedRefresh(t *testing.T) {
+	for _, mode := range []string{"execute", "count", "stream", "stream bootstrap"} {
+		t.Run(mode, func(t *testing.T) {
+			unauthorized := &Error{HTTPStatus: http.StatusUnauthorized, Message: "expired credential"}
+			e := &claudeCancellationTestExecutor{}
+			e.executeFn = func(context.Context, *Auth) (executor.Response, error) { return executor.Response{}, unauthorized }
+			e.countFn = e.executeFn
+			e.streamFn = func(context.Context, *Auth) (*executor.StreamResult, error) {
+				if mode == "stream bootstrap" {
+					return streamErrorResult(nil, unauthorized), nil
+				}
+				return nil, unauthorized
+			}
+			m, a, model := newClaudeCancellationTestManager(t, e, nil)
+			t.Cleanup(m.StopAutoRefresh)
+			m.SetConfig(poolTestConfig())
+			a.Metadata["pool_id"] = "basic"
+			if _, err := m.Update(context.Background(), a); err != nil {
+				t.Fatal(err)
+			}
+			e.refreshFn = func(_ context.Context, current *Auth) (*Auth, error) {
+				cfg := poolTestConfig()
+				cfg.PoolClients[0].AllowedPools = []string{"premium"}
+				m.SetConfig(cfg)
+				updated := current.Clone()
+				updated.Metadata["access_token"] = "replacement-token"
+				return updated, nil
+			}
+
+			ctx := poolTestContext("basic")
+			providers := []string{e.Identifier()}
+			req := executor.Request{Model: model}
+			var err error
+			switch mode {
+			case "execute":
+				_, err = m.Execute(ctx, providers, req, executor.Options{})
+			case "count":
+				_, err = m.ExecuteCount(ctx, providers, req, executor.Options{})
+			default:
+				var stream *executor.StreamResult
+				stream, err = m.ExecuteStream(ctx, providers, req, executor.Options{Stream: true})
+				if stream != nil {
+					for chunk := range stream.Chunks {
+						if chunk.Err != nil {
+							err = chunk.Err
+						}
+					}
+				}
+			}
+			if err == nil {
+				t.Fatal("request succeeded after pool access was revoked")
+			}
+			current, ok := m.GetByID(a.ID)
+			if !ok || authAccessToken(current) != "replacement-token" || e.refreshCalls.Load() != 1 {
+				t.Fatal("expected one successful credential refresh before the retry")
+			}
+			if calls := e.executeCalls.Load() + e.countCalls.Load() + e.streamCalls.Load(); calls != 1 {
+				t.Fatalf("upstream calls = %d, want only the initial request", calls)
+			}
+		})
+	}
+}
+
 func TestAccountPoolsAdmissionRevalidatesPolicyAndMembership(t *testing.T) {
 	m, _ := newPoolTestManager(t)
 	selected, _ := m.GetByID("pool-a1")

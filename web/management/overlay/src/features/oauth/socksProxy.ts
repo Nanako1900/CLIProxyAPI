@@ -11,6 +11,7 @@ const BUILTIN_OAUTH_PROVIDERS = new Set([
   'kimi-ai',
   'xai',
   'devin',
+  'copilot',
   'meta',
 ]);
 

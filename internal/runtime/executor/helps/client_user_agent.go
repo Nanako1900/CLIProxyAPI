@@ -2,13 +2,14 @@ package helps
 
 import (
 	"context"
+	"maps"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/MoeForge/moego/regexp"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
@@ -185,6 +186,54 @@ func IsUserAgentAttribute(key string) bool {
 	return ok && strings.EqualFold(prefix, "header") && strings.EqualFold(strings.TrimSpace(name), "User-Agent")
 }
 
+// credentialAttrsWithoutUserAgent reserves the native UA for the final resolver.
+func credentialAttrsWithoutUserAgent(attrs map[string]string) map[string]string {
+	for key := range attrs {
+		if IsUserAgentAttribute(key) {
+			filtered := maps.Clone(attrs)
+			maps.DeleteFunc(filtered, func(key, _ string) bool { return IsUserAgentAttribute(key) })
+			return filtered
+		}
+	}
+	return attrs
+}
+
+// ConfiguredCredentialUserAgent selects the raw credential User-Agent before
+// resolving request-specific header variables.
+func ConfiguredCredentialUserAgent(auth *cliproxyauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	return userAgentHeaderOverride(auth.Attributes, "header:User-Agent", IsUserAgentAttribute)
+}
+
+// Existing credentials can contain multiple spellings of one header. Prefer the
+// canonical key, followed by the lexicographically first valid alternative.
+func userAgentHeaderOverride[T any](headers map[string]T, canonical string, matches func(string) bool) string {
+	var bestKey, bestValue string
+	for key, raw := range headers {
+		if !matches(key) {
+			continue
+		}
+		value, ok := any(raw).(string)
+		if !ok || !config.ValidUserAgent(value) {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if key == canonical {
+			return value
+		}
+		if bestKey == "" || key < bestKey {
+			bestKey, bestValue = key, value
+		}
+	}
+	return bestValue
+}
+
+// credentialUserAgentAttribute returns the configured UA before header variables are resolved.
 func credentialUserAgentAttribute(auth *cliproxyauth.Auth) string {
 	if auth != nil {
 		for key, raw := range auth.Attributes {
@@ -214,6 +263,26 @@ func resolveCredentialUserAgent(ctx context.Context, raw string, clientHeaders h
 	return strings.TrimSpace(value)
 }
 
+// ApplyClaudeAPIKeyHeaders preserves the native UA until a validated setting
+// replaces it. Explicit mappings supply the complete UA, including its fields.
+func ApplyClaudeAPIKeyHeaders(r *http.Request, cfg *config.Config, auth *cliproxyauth.Auth, clientHeaders http.Header) {
+	if auth != nil {
+		util.ApplyCustomHeadersFromAttrs(r, credentialAttrsWithoutUserAgent(auth.Attributes), clientHeaders)
+	}
+	value := ConfiguredCredentialUserAgent(auth)
+	if strings.HasPrefix(value, "$") || strings.Contains(strings.ToUpper(value), "$CPA-SESSION-ID") {
+		if mapped := resolveCredentialUserAgent(r.Context(), value, clientHeaders); mapped != "" {
+			setClientUserAgent(r.Header, mapped)
+			return
+		}
+		value = ""
+	}
+	if value == "" && cfg != nil {
+		value = cfg.ClaudeHeaderDefaults.UserAgent
+	}
+	applyClientUserAgentValue(r.Header, "claude", value)
+}
+
 // ApplyConfiguredUserAgent is the final UA boundary after native/model headers.
 // Credential overrides take precedence over provider settings. Only UA is changed.
 func ApplyConfiguredUserAgent(ctx context.Context, headers http.Header, cfg *config.Config, auth *cliproxyauth.Auth, provider string, clientHeaders http.Header) {
@@ -231,6 +300,10 @@ func ApplyConfiguredUserAgent(ctx context.Context, headers http.Header, cfg *con
 	if override := resolveCredentialUserAgent(ctx, credentialUserAgentAttribute(auth), clientHeaders); override != "" {
 		value = override
 	}
+	applyClientUserAgentValue(headers, provider, value)
+}
+
+func applyClientUserAgentValue(headers http.Header, provider, value string) {
 	if !config.ValidUserAgent(value) || strings.TrimSpace(value) == "" {
 		return
 	}

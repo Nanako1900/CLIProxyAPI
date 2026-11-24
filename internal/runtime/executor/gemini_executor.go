@@ -475,7 +475,7 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 			}
 			for i := range lines {
 				select {
-				case out <- cliproxyexecutor.StreamChunk{Payload: lines[i]}:
+				case out <- helps.TranslatedClaudeStreamChunk(responseFormat, lines[i], streamErr):
 					if len(lines[i]) > 0 {
 						zeroOutputGuard.MarkEmitted()
 					}
@@ -661,7 +661,7 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		commitReplay()
 		for i := range lines {
 			select {
-			case out <- cliproxyexecutor.StreamChunk{Payload: lines[i]}:
+			case out <- helps.TranslatedClaudeStreamChunk(responseFormat, lines[i], streamErr):
 				if helps.IsGeminiTerminalStreamChunk(lines[i]) {
 					terminalDelivered = true
 				}

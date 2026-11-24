@@ -119,7 +119,7 @@ func TestStartOAuthV8RequiresSOCKSBeforeProviderInitialization(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.POST("/start", h.StartOAuthV8)
-	for _, provider := range []string{"codex", " CoDeX ", "claude", "antigravity", "kimi", "kimi-ai", "xai", "devin", "meta"} {
+	for _, provider := range []string{"codex", " CoDeX ", "claude", "antigravity", "kimi", "kimi-ai", "xai", "devin", "copilot", "meta"} {
 		for _, value := range []string{"", "http://user:secret@localhost:8080", "https://localhost:8080", "direct", "socks5://localhost", "socks5://localhost:0"} {
 			body := ojson.NewDocString(`{}`)
 			if errSet := body.Set("provider", provider); errSet != nil {

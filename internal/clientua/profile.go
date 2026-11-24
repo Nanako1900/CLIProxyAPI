@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/MoeForge/moego/regexp"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
@@ -21,20 +22,28 @@ const geminiVersion = `[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z
 const geminiProduct = `GeminiCLI(?:-(?:tui|cli-command|a2a-server|acp(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?))?`
 const googleAuthSuffix = `(?: google-api-nodejs-client/` + geminiVersion + `)?`
 
+const goToolchainBase = `go[0-9]+\.[0-9]+`
+const goToolchainVersion = goToolchainBase + `(?:\.[0-9]+|(?:beta|rc)[0-9]+)?(?:-[0-9A-Za-z]+(?:[-._][0-9A-Za-z]+)*)?`
+const goExperiments = `(?: X:[a-z0-9]+(?:,[a-z0-9]+)*)?`
+
+var goReleaseToolchainPattern = regexp.MustCompile(`^` + goToolchainVersion + `(?: cl/[0-9]+)?(?: \+[[:xdigit:]]+)?` + goExperiments + `$`)
+var goDevelopmentToolchainPattern = regexp.MustCompile(`^(?:devel ` + goToolchainBase + `-[[:xdigit:]]+|` + goToolchainBase + `-devel_[[:xdigit:]]+)(?: ([A-Z][a-z]{2} .+?))?` + goExperiments + `$`)
+
 var userAgentPattern = regexp.MustCompile(`^(claude-cli|codex-tui|codex_cli_rs|codex_exec|codex_vscode|codex|Codex Desktop)/([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)(?:[ (].*)?$`)
 var geminiUserAgentPattern = regexp.MustCompile(`^` + geminiProduct + `/(` + geminiVersion + `)/([^ ].*?)` + googleAuthSuffix + `$`)
 var geminiVSCodeUserAgentPattern = regexp.MustCompile(`^CloudCodeVSCode/(` + geminiVersion + `) \(aidev_client(?:;[^();]*)*; *proxy_client=geminicli(?:;[^();]*)*\)` + googleAuthSuffix + `$`)
+var googleGenAIGoUserAgentPattern = regexp.MustCompile(`^google-genai-sdk/(` + geminiVersion + `)(?:\+vertex-genai-modules/` + geminiVersion + `)? gl-go/(.+)$`)
 var softwareVersionPattern = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
 
 var claudeHeaders = []string{"User-Agent", "X-Stainless-Package-Version", "X-Stainless-Runtime-Version", "X-Stainless-Os", "X-Stainless-Arch", "X-Stainless-Timeout"}
 var codexHeaders = []string{"User-Agent", "X-Codex-Beta-Features"}
 
-// Profile contains only fields editable in the native header-default settings.
-// Credentials, cookies, network addresses, and request bodies are never retained.
+// Profile identifies a declared client and retains only its allowlisted identity headers.
 type Profile struct {
-	Provider string            `json:"provider" yaml:"provider"`
-	Version  string            `json:"version" yaml:"version"`
-	Headers  map[string]string `json:"headers" yaml:"headers"`
+	Provider   string            `json:"provider" yaml:"provider"`
+	ClientKind string            `json:"clientKind,omitempty" yaml:"-"` // Derived from the stored User-Agent on load.
+	Version    string            `json:"version" yaml:"version"`
+	Headers    map[string]string `json:"headers" yaml:"headers"`
 }
 
 func ValidProvider(provider string) bool {
@@ -87,15 +96,39 @@ func validGeminiModelAndEnvironment(value string) bool {
 	return false
 }
 
-func geminiUserAgentVersion(ua string) string {
-	if strings.HasPrefix(ua, "CloudCodeVSCode/") {
-		if match := geminiVSCodeUserAgentPattern.FindStringSubmatch(ua); match != nil {
-			return match[1]
-		}
-	} else if match := geminiUserAgentPattern.FindStringSubmatch(ua); match != nil && validGeminiModelAndEnvironment(match[2]) {
-		return match[1]
+// The SDK embeds runtime.Version() verbatim. Go development toolchains may add
+// the commit date to their version and revision, followed by experiment flags.
+func validGenAIGoToolchain(runtime string) bool {
+	if goReleaseToolchainPattern.MatchString(runtime) {
+		return true
 	}
-	return ""
+	match := goDevelopmentToolchainPattern.FindStringSubmatch(runtime)
+	if match == nil {
+		return false
+	}
+	if match[1] == "" {
+		return true
+	}
+	_, err := time.Parse("Mon Jan 2 15:04:05 2006 -0700", match[1])
+	return err == nil
+}
+
+func geminiUserAgentIdentity(ua string) (version, clientKind string) {
+	switch {
+	case strings.HasPrefix(ua, "google-genai-sdk/"):
+		if match := googleGenAIGoUserAgentPattern.FindStringSubmatch(ua); match != nil && validGenAIGoToolchain(match[2]) {
+			return match[1], "google-genai-go"
+		}
+	case strings.HasPrefix(ua, "CloudCodeVSCode/"):
+		if match := geminiVSCodeUserAgentPattern.FindStringSubmatch(ua); match != nil {
+			return match[1], ""
+		}
+	case strings.HasPrefix(ua, "GeminiCLI"):
+		if match := geminiUserAgentPattern.FindStringSubmatch(ua); match != nil && validGeminiModelAndEnvironment(match[2]) {
+			return match[1], ""
+		}
+	}
+	return "", ""
 }
 
 // FromHeaders recognizes a declared client identity without claiming authenticity.
@@ -104,12 +137,12 @@ func FromHeaders(headers http.Header) (Profile, error) {
 	if errHeader != nil {
 		return Profile{}, errHeader
 	}
-	if version := geminiUserAgentVersion(ua); version != "" {
-		return Profile{Provider: "gemini", Version: version, Headers: map[string]string{"User-Agent": ua}}, nil
+	if version, clientKind := geminiUserAgentIdentity(ua); version != "" {
+		return Profile{Provider: "gemini", ClientKind: clientKind, Version: version, Headers: map[string]string{"User-Agent": ua}}, nil
 	}
 	match := userAgentPattern.FindStringSubmatch(ua)
 	if len(match) != 3 {
-		return Profile{}, fmt.Errorf("a Claude Code, Codex, or Gemini CLI User-Agent with a version is required")
+		return Profile{}, fmt.Errorf("a Claude Code, Codex, Gemini CLI, or Google Gen AI Go SDK User-Agent with a version is required")
 	}
 	provider, allowed := "codex", codexHeaders
 	if match[1] == "claude-cli" {

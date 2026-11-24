@@ -45,6 +45,18 @@ func TranslatedClaudeStreamErrorPayload(responseFormat sdktranslator.Format, lin
 	return "", false
 }
 
+// TranslatedClaudeStreamChunk attaches the retained failure to its error event.
+// A batch can also contain preceding content or trailing usage frames.
+func TranslatedClaudeStreamChunk(format sdktranslator.Format, payload []byte, retainedErr error) cliproxyexecutor.StreamChunk {
+	chunk := cliproxyexecutor.StreamChunk{Payload: payload}
+	if retainedErr != nil {
+		if _, ok := TranslatedClaudeStreamErrorPayload(format, [][]byte{payload}); ok {
+			chunk.ConfirmedError = retainedErr
+		}
+	}
+	return chunk
+}
+
 // CaptureTranslatedClaudeStreamError retains the first SSE error event payload
 // so failure usage and terminal StreamChunk.Err can be emitted after any trailing usage chunk.
 func CaptureTranslatedClaudeStreamError(responseFormat sdktranslator.Format, lines [][]byte, retainedErr *error, buildErr func(string) error) {

@@ -1,6 +1,7 @@
 package management
 
 import (
+	"bytes"
 	"context"
 	"net/http/httptest"
 	"os"
@@ -42,6 +43,10 @@ func TestAccountPoolRemovalRequiresDisabledEmptyPoolAndVersion(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			snapshot, errSnapshot := config.ReadConfigFileSnapshot(path)
+			if errSnapshot != nil {
+				t.Fatal(errSnapshot)
+			}
 			m := coreauth.NewManager(nil, nil, nil)
 			if tc.member {
 				if _, err := m.Register(context.Background(), &coreauth.Auth{ID: "disabled-account", Disabled: true, PoolID: "retired"}); err != nil {
@@ -53,7 +58,7 @@ func TestAccountPoolRemovalRequiresDisabledEmptyPoolAndVersion(t *testing.T) {
 			router.PATCH("/config", h.ConfigV8)
 			req := httptest.NewRequest("PATCH", "/config", strings.NewReader(`{"routing":{"account-pools":{"pools":[]}}}`))
 			if tc.match == "current" {
-				req.Header.Set("If-Match", configV8ETag(config.ComputeSourceHash([]byte(raw))))
+				req.Header.Set("If-Match", configV8ETag(snapshot.SourceHash()))
 			} else if tc.match == "*" {
 				req.Header.Set("If-Match", "*")
 			} else if tc.match != "" {
@@ -68,7 +73,7 @@ func TestAccountPoolRemovalRequiresDisabledEmptyPoolAndVersion(t *testing.T) {
 			if errRead != nil {
 				t.Fatal(errRead)
 			}
-			if tc.status != 200 && string(after) != raw {
+			if tc.status != 200 && !bytes.Equal(after, snapshot.Bytes()) {
 				t.Fatal("rejected deletion modified config")
 			}
 			if tc.status == 200 {
@@ -121,7 +126,7 @@ func TestPoolRemovalSerializesWithMembershipPersistence(t *testing.T) {
 		h.poolMutationMu.Unlock()
 	}
 	removal := httptest.NewRequest("PATCH", "/config", strings.NewReader(`{"routing":{"account-pools":{"pools":[]}}}`))
-	removal.Header.Set("If-Match", configV8ETag(config.ComputeSourceHash([]byte(raw))))
+	removal.Header.Set("If-Match", configV8ETag(cfg.SourceHash))
 	removed := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		rec := httptest.NewRecorder()
