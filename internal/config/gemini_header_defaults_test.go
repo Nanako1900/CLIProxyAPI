@@ -189,8 +189,8 @@ api-keys:
 	if bootCfg.GeminiHeaderDefaults.UserAgent != "" || bootCfg.GeminiHeaderDefaults.APIClient != "" {
 		t.Fatalf("expected cleared GeminiHeaderDefaults, got %#v", bootCfg.GeminiHeaderDefaults)
 	}
-	if bootCfg.CodexHeaderDefaults.UserAgent != "auto" || bootCfg.ClaudeHeaderDefaults.UserAgent != "auto" {
-		t.Fatalf("expected Codex/Claude auto preserved, got codex=%q claude=%q", bootCfg.CodexHeaderDefaults.UserAgent, bootCfg.ClaudeHeaderDefaults.UserAgent)
+	if bootCfg.CodexHeaderDefaults.UserAgent != "" || bootCfg.ClaudeHeaderDefaults.UserAgent != "auto" {
+		t.Fatalf("expected Codex auto cleared and Claude auto preserved, got codex=%q claude=%q", bootCfg.CodexHeaderDefaults.UserAgent, bootCfg.ClaudeHeaderDefaults.UserAgent)
 	}
 
 	// File startup loading must strip legacy Gemini auto and persist the migrated config.
@@ -205,8 +205,8 @@ api-keys:
 	if cfg.GeminiHeaderDefaults.UserAgent != "" || cfg.GeminiHeaderDefaults.APIClient != "" {
 		t.Fatalf("expected cleared GeminiHeaderDefaults after LoadConfig, got %#v", cfg.GeminiHeaderDefaults)
 	}
-	if cfg.CodexHeaderDefaults.UserAgent != "auto" || cfg.ClaudeHeaderDefaults.UserAgent != "auto" {
-		t.Fatalf("expected Codex/Claude auto preserved after LoadConfig, got codex=%q claude=%q", cfg.CodexHeaderDefaults.UserAgent, cfg.ClaudeHeaderDefaults.UserAgent)
+	if cfg.CodexHeaderDefaults.UserAgent != "" || cfg.ClaudeHeaderDefaults.UserAgent != "auto" {
+		t.Fatalf("expected Codex auto cleared and Claude auto preserved after LoadConfig, got codex=%q claude=%q", cfg.CodexHeaderDefaults.UserAgent, cfg.ClaudeHeaderDefaults.UserAgent)
 	}
 	if len(cfg.GeminiKey) != 2 || cfg.GeminiKey[0].Headers["X-Keep"] != "1" || cfg.GeminiKey[1].Headers["X-Key"] != "2" {
 		t.Fatalf("unexpected GeminiKey headers after migration: %#v", cfg.GeminiKey)

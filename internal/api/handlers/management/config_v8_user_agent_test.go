@@ -31,14 +31,14 @@ func TestConfigV8UserAgentSaveReloadAndInvalidValue(t *testing.T) {
 	router := gin.New()
 	router.PATCH("/v8/management/config", handler.ConfigV8)
 	recorder := httptest.NewRecorder()
-	body := `{"oauth":{"providers":{"codex":{"header-defaults":{"user-agent":"auto"}}}},"upstream":{"claude":{"header-defaults":{"user-agent":"claude-cli/2.1.319 (external, cli)"}}}}`
+	body := `{"oauth":{"providers":{"codex":{"header-defaults":{"user-agent":"codex-tui/0.172.0 (Mac OS 27.3.0; arm64)"}}}},"upstream":{"claude":{"header-defaults":{"user-agent":"claude-cli/2.1.319 (external, cli)"}}}}`
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/v8/management/config", strings.NewReader(body)))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("save failed: %s", recorder.Body)
 	}
 	select {
 	case updated := <-reloads:
-		if updated.CodexHeaderDefaults.UserAgent != "auto" || updated.ClaudeHeaderDefaults.UserAgent != "claude-cli/2.1.319 (external, cli)" || updated.Plugins.Enabled {
+		if updated.CodexHeaderDefaults.UserAgent != "codex-tui/0.172.0 (Mac OS 27.3.0; arm64)" || updated.ClaudeHeaderDefaults.UserAgent != "claude-cli/2.1.319 (external, cli)" || updated.Plugins.Enabled {
 			t.Fatal("incorrect native reload snapshot")
 		}
 	case <-t.Context().Done():
@@ -49,11 +49,17 @@ func TestConfigV8UserAgentSaveReloadAndInvalidValue(t *testing.T) {
 		t.Fatal(errRead)
 	}
 	loaded, errLoad := config.LoadConfig(path)
-	if errLoad != nil || loaded.CodexHeaderDefaults.UserAgent != "auto" {
+	if errLoad != nil || loaded.CodexHeaderDefaults.UserAgent != "codex-tui/0.172.0 (Mac OS 27.3.0; arm64)" {
 		t.Fatalf("saved value did not persist: %v", errLoad)
 	}
 	if loaded.ForAPIKey().CodexHeaderDefaults.UserAgent != "" {
 		t.Fatal("OAuth setting leaked into API-key scope")
+	}
+	// Codex "auto" must be rejected with 422.
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/v8/management/config", strings.NewReader(`{"oauth":{"providers":{"codex":{"header-defaults":{"user-agent":"auto"}}}}}`)))
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("codex auto accepted: %d %s", recorder.Code, recorder.Body)
 	}
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPatch, "/v8/management/config", strings.NewReader(`{"upstream":{"claude":{"header-defaults":{"user-agent":"bad\r\nInjected: yes"}}}}`)))

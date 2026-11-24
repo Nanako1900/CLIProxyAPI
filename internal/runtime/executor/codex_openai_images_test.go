@@ -243,7 +243,14 @@ func TestCodexExecutorDirectOpenAIImageGenerationUsesImagesEndpoint(t *testing.T
 		"X-Client-Request-Id":   "client-request-1",
 		"Originator":            "Codex Desktop",
 	})
-	executor := NewCodexExecutor(&config.Config{})
+	const wantUA = "codex-tui/0.172.0 (Mac OS 27.3.0; arm64) Apple_Terminal/489.11 (codex-tui; 0.172.0)"
+	const wantOriginator = "codex-tui"
+	executor := NewCodexExecutor(&config.Config{
+		CodexHeaderDefaults: config.CodexHeaderDefaults{
+			UserAgent:  wantUA,
+			Originator: wantOriginator,
+		},
+	})
 	resp, errExecute := executor.Execute(ctx, newCodexOpenAIImageTestAuth(server.URL), cliproxyexecutor.Request{
 		Model:   "codex/gpt-image-1.5",
 		Payload: []byte(`{"model":"codex/gpt-image-1.5","prompt":"A cute baby sea otter","n":1,"size":"1024x1024","quality":"high","background":"opaque","output_format":"jpeg","output_compression":70,"moderation":"low","extra":{"preserve":true},"stream":false}`),
@@ -261,8 +268,8 @@ func TestCodexExecutorDirectOpenAIImageGenerationUsesImagesEndpoint(t *testing.T
 	if gotAccept != "application/json" {
 		t.Fatalf("Accept = %q, want application/json", gotAccept)
 	}
-	if gotUA != codexUserAgent {
-		t.Fatalf("User-Agent = %q, want codex default %q", gotUA, codexUserAgent)
+	if gotUA != wantUA {
+		t.Fatalf("User-Agent = %q, want pasted UALab %q", gotUA, wantUA)
 	}
 	if gotVersion != "0.135.0" {
 		t.Fatalf("Version = %q, want %q", gotVersion, "0.135.0")
@@ -273,8 +280,8 @@ func TestCodexExecutorDirectOpenAIImageGenerationUsesImagesEndpoint(t *testing.T
 	if gotClientRequestID != "client-request-1" {
 		t.Fatalf("X-Client-Request-Id = %q, want %q", gotClientRequestID, "client-request-1")
 	}
-	if gotOriginator != codexOriginator {
-		t.Fatalf("Originator = %q, want %q", gotOriginator, codexOriginator)
+	if gotOriginator != wantOriginator {
+		t.Fatalf("Originator = %q, want %q", gotOriginator, wantOriginator)
 	}
 	if got := ojson.GetBytes(gotBody, "model").String(); got != "gpt-image-1.5" {
 		t.Fatalf("model = %q, want gpt-image-1.5; body=%s", got, string(gotBody))

@@ -134,8 +134,7 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 	}
 
 	isAPIKey := codexAuthUsesAPIKey(auth)
-	cfgUserAgent, cfgBetaFeatures := codexHeaderDefaults(cfg, auth)
-	ensureHeaderWithPriority(headers, ginHeaders, "x-codex-beta-features", cfgBetaFeatures, "")
+	misc.EnsureHeader(headers, ginHeaders, "x-codex-beta-features", "")
 	misc.EnsureHeader(headers, ginHeaders, "x-codex-turn-state", "")
 	misc.EnsureHeader(headers, ginHeaders, "x-codex-turn-metadata", "")
 	misc.EnsureHeader(headers, ginHeaders, "x-client-request-id", "")
@@ -143,11 +142,6 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 	misc.EnsureHeader(headers, ginHeaders, "Version", "")
 	if nativeRequest {
 		misc.EnsureHeader(headers, ginHeaders, codexResponsesLiteHeader, "")
-	}
-	if isAPIKey {
-		ensureHeaderWithPriority(headers, ginHeaders, "User-Agent", "", "")
-	} else {
-		ensureHeaderWithConfigPrecedence(headers, ginHeaders, "User-Agent", cfgUserAgent, codexUserAgent)
 	}
 
 	betaHeader := strings.TrimSpace(headers.Get("OpenAI-Beta"))
@@ -158,6 +152,7 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 		betaHeader = codexResponsesWebsocketBetaHeaderValue
 	}
 	headers.Set("OpenAI-Beta", betaHeader)
+	helps.ApplyCodexUALabWebsocketHeaders(headers, cfg)
 	sessionFallback := ""
 	if strings.Contains(headers.Get("User-Agent"), "Mac OS") {
 		sessionFallback = uuid.NewString()
@@ -174,11 +169,6 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 			}
 		}
 	}
-	if originator := strings.TrimSpace(ginHeaders.Get("Originator")); originator != "" {
-		headers.Set("Originator", originator)
-	} else if !isAPIKey {
-		headers.Set("Originator", codexOriginator)
-	}
 	if !isAPIKey {
 		if auth != nil && auth.Metadata != nil {
 			if accountID, ok := auth.Metadata["account_id"].(string); ok {
@@ -189,13 +179,9 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 		}
 	}
 
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
 	req := (&http.Request{Header: headers}).WithContext(ctx)
-	util.ApplyCustomHeadersFromAttrs(req, attrs, ginHeaders)
-	applyCodexCloakingHeaders(headers, cfg, auth)
+	util.ApplyCustomHeadersFromAttrs(req, filterCodexAttrs(auth), ginHeaders)
+	helps.ApplyCodexUALabWebsocketHeaders(headers, cfg)
 
 	return headers
 }
@@ -341,61 +327,5 @@ func deleteHeaderCaseInsensitive(headers http.Header, key string) {
 		if strings.EqualFold(existingKey, key) {
 			delete(headers, existingKey)
 		}
-	}
-}
-
-func codexHeaderDefaults(cfg *config.Config, auth *cliproxyauth.Auth) (string, string) {
-	if cfg == nil || auth == nil || codexAuthUsesAPIKey(auth) {
-		return "", ""
-	}
-	userAgent := strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent)
-	if strings.EqualFold(userAgent, "auto") {
-		// Build the native identity first; release tracking runs at the final boundary.
-		userAgent = ""
-	}
-	return userAgent, strings.TrimSpace(cfg.CodexHeaderDefaults.BetaFeatures)
-}
-
-func ensureHeaderWithPriority(target http.Header, source http.Header, key, configValue, fallbackValue string) {
-	if target == nil {
-		return
-	}
-	if strings.TrimSpace(target.Get(key)) != "" {
-		return
-	}
-	if source != nil {
-		if val := strings.TrimSpace(source.Get(key)); val != "" {
-			target.Set(key, val)
-			return
-		}
-	}
-	if val := strings.TrimSpace(configValue); val != "" {
-		target.Set(key, val)
-		return
-	}
-	if val := strings.TrimSpace(fallbackValue); val != "" {
-		target.Set(key, val)
-	}
-}
-
-func ensureHeaderWithConfigPrecedence(target http.Header, source http.Header, key, configValue, fallbackValue string) {
-	if target == nil {
-		return
-	}
-	if strings.TrimSpace(target.Get(key)) != "" {
-		return
-	}
-	if val := strings.TrimSpace(configValue); val != "" {
-		target.Set(key, val)
-		return
-	}
-	if source != nil {
-		if val := strings.TrimSpace(source.Get(key)); val != "" {
-			target.Set(key, val)
-			return
-		}
-	}
-	if val := strings.TrimSpace(fallbackValue); val != "" {
-		target.Set(key, val)
 	}
 }

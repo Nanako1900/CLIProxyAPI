@@ -47,14 +47,54 @@ func (cfg *Config) NormalizeClaudeConfig() {
 	}
 }
 
-// SanitizeCodexHeaderDefaults trims surrounding whitespace from the
-// configured Codex header fallback values.
+// SanitizeCodexHeaderDefaults trims surrounding whitespace from configured
+// Codex UALab fingerprint values and deduplicates HeaderOrder while
+// preserving exact wire casing and order.
 func (cfg *Config) SanitizeCodexHeaderDefaults() {
 	if cfg == nil {
 		return
 	}
 	cfg.CodexHeaderDefaults.UserAgent = strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent)
+	cfg.CodexHeaderDefaults.Originator = strings.TrimSpace(cfg.CodexHeaderDefaults.Originator)
 	cfg.CodexHeaderDefaults.BetaFeatures = strings.TrimSpace(cfg.CodexHeaderDefaults.BetaFeatures)
+	cfg.CodexHeaderDefaults.AcceptEncoding = strings.TrimSpace(cfg.CodexHeaderDefaults.AcceptEncoding)
+	if len(cfg.CodexHeaderDefaults.ExtraHeaders) > 0 {
+		cleaned := make(map[string]string, len(cfg.CodexHeaderDefaults.ExtraHeaders))
+		for k, v := range cfg.CodexHeaderDefaults.ExtraHeaders {
+			k = strings.TrimSpace(k)
+			v = strings.TrimSpace(v)
+			if k == "" || v == "" {
+				continue
+			}
+			cleaned[k] = v
+		}
+		if len(cleaned) == 0 {
+			cfg.CodexHeaderDefaults.ExtraHeaders = nil
+		} else {
+			cfg.CodexHeaderDefaults.ExtraHeaders = cleaned
+		}
+	}
+	if len(cfg.CodexHeaderDefaults.HeaderOrder) > 0 {
+		out := make([]string, 0, len(cfg.CodexHeaderDefaults.HeaderOrder))
+		seen := make(map[string]struct{}, len(cfg.CodexHeaderDefaults.HeaderOrder))
+		for _, name := range cfg.CodexHeaderDefaults.HeaderOrder {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			key := strings.ToLower(name)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, name)
+		}
+		if len(out) == 0 {
+			cfg.CodexHeaderDefaults.HeaderOrder = nil
+		} else {
+			cfg.CodexHeaderDefaults.HeaderOrder = out
+		}
+	}
 	cfg.Codex.SignInWithChatGPTIdentifier = strings.TrimSpace(cfg.Codex.SignInWithChatGPTIdentifier)
 }
 

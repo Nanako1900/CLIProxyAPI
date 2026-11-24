@@ -82,13 +82,32 @@ func ClientUserAgentStatuses(cfg *config.Config) []ClientUserAgentStatus {
 				}
 			}
 		case "codex":
-			status.DefaultUserAgent = DefaultCodexUserAgent
-			status.BaselineHeaders["User-Agent"] = DefaultCodexUserAgent
-			status.Auto.Enabled = settings.Codex
+			status.Mode = "unconfigured"
+			status.Auto.Enabled = false
+			status.Auto.RegistryURL = ""
 			if cfg != nil {
-				status.ConfiguredUserAgent = strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent)
-				status.BaselineHeaders["X-Codex-Beta-Features"] = cfg.CodexHeaderDefaults.BetaFeatures
+				hd := cfg.CodexHeaderDefaults
+				ua := strings.TrimSpace(hd.UserAgent)
+				if ua != "" && !strings.EqualFold(ua, "auto") {
+					status.Mode = "ualab"
+					status.ConfiguredUserAgent = ua
+					status.ResolvedUserAgent = ua
+					status.BaselineHeaders["User-Agent"] = ua
+				}
+				if originator := strings.TrimSpace(hd.Originator); originator != "" {
+					status.BaselineHeaders["Originator"] = originator
+				}
+				if beta := strings.TrimSpace(hd.BetaFeatures); beta != "" {
+					status.BaselineHeaders["X-Codex-Beta-Features"] = beta
+				}
+				if ae := strings.TrimSpace(hd.AcceptEncoding); ae != "" {
+					status.BaselineHeaders["Accept-Encoding"] = ae
+				}
 			}
+			status.Auto.Result = "never"
+			status.Auto.RefreshIntervalSeconds = 0
+			statuses = append(statuses, status)
+			continue
 		case "gemini":
 			status.Mode = "unconfigured"
 			status.Auto.Enabled = false

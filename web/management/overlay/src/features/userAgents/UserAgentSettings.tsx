@@ -7,7 +7,9 @@ import { Select } from '@/components/ui/Select';
 import { ToggleSwitch } from '@/components/ui/ToggleSwitch';
 import type { ClientProvider } from '@/services/api/clientUserAgents';
 import {
+  formatUALabCodexYaml,
   formatUALabGeminiYaml,
+  parseUALabCodexYaml,
   parseUALabGeminiYaml,
   UALAB_GENERATED_MARKER,
   type UserAgentDraft,
@@ -135,11 +137,133 @@ function GeminiUALabSettings({
   );
 }
 
+function CodexUALabSettings({
+  draft,
+  disabled,
+  onChange,
+}: {
+  draft: UserAgentDraft;
+  disabled: boolean;
+  onChange: (draft: UserAgentDraft) => void;
+}) {
+  const [rawYaml, setRawYaml] = useState(() => formatUALabCodexYaml(draft.codex));
+  const [parseError, setParseError] = useState('');
+
+  useEffect(() => {
+    setRawYaml((current) => {
+      if (current.trim()) return current;
+      return formatUALabCodexYaml(draft.codex);
+    });
+  }, [draft.codex]);
+
+  const applyPastedYaml = (value: string) => {
+    setRawYaml(value);
+    if (!value.trim()) {
+      setParseError('');
+      onChange({
+        ...draft,
+        codex: {
+          userAgent: '',
+          originator: '',
+          betaFeatures: '',
+          acceptEncoding: '',
+          forceHttp1: false,
+          headerOrder: [],
+          extraHeaders: {},
+        },
+      });
+      return;
+    }
+    const result = parseUALabCodexYaml(value);
+    if (!result.draft) {
+      setParseError(result.error ?? '');
+      return;
+    }
+    setParseError('');
+    onChange({ ...draft, codex: result.draft });
+  };
+
+  return (
+    <Card
+      title="Codex — 粘贴 UALab 本地配置"
+      extra={<span className={styles.eyebrow}>{UALAB_GENERATED_MARKER}</span>}
+    >
+      <div className={styles.stack}>
+        <p className={styles.muted}>
+          Codex 已移除 auto 与内置默认 UA 逻辑。请在本地运行{' '}
+          <code>./bin/ualab export --tag codex-cli --format cpa-yaml</code> 后，将生成的完整 YAML
+          直接粘贴到下方：
+        </p>
+        <label className={styles.stack}>
+          <span>{UALAB_GENERATED_MARKER} YAML</span>
+          <textarea
+            className="input"
+            rows={16}
+            spellCheck={false}
+            disabled={disabled}
+            value={rawYaml}
+            placeholder={`${UALAB_GENERATED_MARKER} from local capture (tag: codex-cli)\noauth:\n  providers:\n    codex:\n      header-defaults:\n        user-agent: "codex-tui/..."\n        originator: "codex-tui"\n        beta-features: "remote_compaction_v2"\n        accept-encoding: "zstd,gzip"\n        force-http1: true\n        header-order:\n          - x-codex-beta-features\n          - x-codex-window-id\n          - x-codex-turn-metadata\n          - x-client-request-id\n          - session-id\n          - thread-id\n          - accept\n          - content-type\n          - authorization\n          - originator\n          - user-agent\n          - accept-encoding\n          - host\n          - content-length`}
+            onChange={(event) => applyPastedYaml(event.target.value)}
+          />
+        </label>
+        {parseError && (
+          <div role="alert" className="error-box">
+            {parseError}
+          </div>
+        )}
+        {draft.codex.userAgent && (
+          <dl className={styles.facts}>
+            <div>
+              <dt>User-Agent</dt>
+              <dd>
+                <code>{draft.codex.userAgent}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Originator</dt>
+              <dd>
+                <code>{draft.codex.originator || '—'}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>X-Codex-Beta-Features</dt>
+              <dd>
+                <code>{draft.codex.betaFeatures || '—'}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Accept-Encoding</dt>
+              <dd>
+                <code>{draft.codex.acceptEncoding || '—'}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Force HTTP/1.1</dt>
+              <dd>
+                <code>{String(draft.codex.forceHttp1)}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>Header Order</dt>
+              <dd>
+                <code>{draft.codex.headerOrder.join(' -> ') || '—'}</code>
+              </dd>
+            </div>
+          </dl>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 export function UserAgentSettings({ provider, draft, status, disabled, onChange }: Props) {
   const { t } = useTranslation();
   const uaInputId = useId();
   if (provider === 'gemini') {
     return <GeminiUALabSettings draft={draft} disabled={disabled} onChange={onChange} />;
+  }
+  if (provider === 'codex') {
+    return <CodexUALabSettings draft={draft} disabled={disabled} onChange={onChange} />;
   }
   const current = draft[provider];
   const mode = !current.userAgent.trim()
@@ -198,7 +322,7 @@ export function UserAgentSettings({ provider, draft, status, disabled, onChange 
         />
         {mode === 'auto' && <p className={styles.note}>{t('ua_panel.auto_scope')}</p>}
         <p className={styles.muted}>{t('ua_panel.scope_' + provider)}</p>
-        {provider === 'claude' ? (
+        {provider === 'claude' && (
           <>
             <div className={styles.formGrid}>
               {fields.map(([key, header]) => (
@@ -269,16 +393,6 @@ export function UserAgentSettings({ provider, draft, status, disabled, onChange 
               ))}
             </div>
           </>
-        ) : provider === 'codex' && (
-          <Input
-            label="X-Codex-Beta-Features"
-            value={draft.codex.betaFeatures}
-            disabled={disabled}
-            hint={t('ua_panel.codex_beta_hint')}
-            onChange={(event) =>
-              onChange({ ...draft, codex: { ...draft.codex, betaFeatures: event.target.value } })
-            }
-          />
         )}
       </div>
     </Card>

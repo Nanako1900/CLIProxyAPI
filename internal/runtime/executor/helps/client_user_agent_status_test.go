@@ -77,3 +77,31 @@ func TestGeminiUserAgentStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexUserAgentStatus(t *testing.T) {
+	const codexUA = "codex-tui/0.172.0 (Mac OS 27.3.0; arm64) Apple_Terminal/489.11 (codex-tui; 0.172.0)"
+	for _, tc := range []struct {
+		yaml     string
+		wantMode string
+		wantUA   string
+	}{
+		{yaml: "oauth: {providers: {codex: {header-defaults: {user-agent: ''}}}}", wantMode: "unconfigured", wantUA: ""},
+		{yaml: "oauth: {providers: {codex: {header-defaults: {user-agent: '" + codexUA + "', originator: 'codex-tui', beta-features: 'remote_compaction_v2', accept-encoding: 'zstd,gzip'}}}}", wantMode: "ualab", wantUA: codexUA},
+	} {
+		cfg, err := config.ParseConfigBytes([]byte(tc.yaml))
+		if err != nil {
+			t.Fatal(err)
+		}
+		statuses := ClientUserAgentStatuses(cfg)
+		if len(statuses) != 3 || statuses[1].Provider != "codex" {
+			t.Fatal("missing Codex status")
+		}
+		codex := statuses[1]
+		if codex.Auto.Enabled || codex.Auto.RegistryURL != "" || codex.DefaultUserAgent != "" {
+			t.Fatalf("Codex auto/default must be disabled: %+v", codex)
+		}
+		if codex.Mode != tc.wantMode || codex.ResolvedUserAgent != tc.wantUA {
+			t.Fatalf("unexpected Codex status: %+v", codex)
+		}
+	}
+}

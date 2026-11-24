@@ -1429,6 +1429,10 @@ func TestCodexExecutorCodexClientIgnoresUseSIWC(t *testing.T) {
 			}
 
 			cfg := &config.Config{
+				CodexHeaderDefaults: config.CodexHeaderDefaults{
+					UserAgent:  "codex-tui/0.172.0",
+					Originator: "codex-tui",
+				},
 				Payload: config.PayloadConfig{
 					Override: []config.PayloadRule{
 						{

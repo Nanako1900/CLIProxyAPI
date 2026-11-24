@@ -29,11 +29,26 @@ import (
 )
 
 const (
-	codexUserAgent             = helps.DefaultCodexUserAgent
-	codexOriginator            = "codex-tui"
 	codexDefaultImageToolModel = "gpt-image-2"
 	codexResponsesLiteHeader   = "X-OpenAI-Internal-Codex-Responses-Lite"
 )
+
+func filterCodexAttrs(auth *cliproxyauth.Auth) map[string]string {
+	if auth == nil || len(auth.Attributes) == 0 {
+		return nil
+	}
+	filtered := make(map[string]string, len(auth.Attributes))
+	for key, val := range auth.Attributes {
+		if helps.IsCodexIdentityAttribute(key) {
+			continue
+		}
+		filtered[key] = val
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
 
 var dataTag = []byte("data:")
 
@@ -125,12 +140,8 @@ func (e *CodexExecutor) PrepareRequest(req *http.Request, auth *cliproxyauth.Aut
 	} else {
 		req.Header.Del("Authorization")
 	}
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(req, attrs)
-	helps.ApplyConfiguredUserAgent(req.Context(), req.Header, e.cfg, auth, "codex", nil)
+	util.ApplyCustomHeadersFromAttrs(req, filterCodexAttrs(auth))
+	helps.ApplyCodexUALabHeaders(req.Header, e.cfg)
 	alignCodexContentEncoding(req)
 	return nil
 }
@@ -147,7 +158,7 @@ func (e *CodexExecutor) HttpRequest(ctx context.Context, auth *cliproxyauth.Auth
 	if err := e.PrepareRequest(httpReq, auth); err != nil {
 		return nil, err
 	}
-	httpClient := helps.NewUtlsHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := helps.NewCodexHTTPClient(ctx, e.cfg, auth, 0)
 	return httpClient.Do(httpReq)
 }
 
@@ -566,9 +577,6 @@ func applyCodexHeadersWithSIWC(r *http.Request, auth *cliproxyauth.Auth, useSIWC
 	misc.EnsureHeader(r.Header, ginHeaders, "Session-Id", "")
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Openai-Internal-Codex-Responses-Lite", "")
 
-	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
-	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, codexUserAgent)
-
 	if stream {
 		r.Header.Set("Accept", "text/event-stream")
 	} else {
@@ -577,11 +585,6 @@ func applyCodexHeadersWithSIWC(r *http.Request, auth *cliproxyauth.Auth, useSIWC
 	r.Header.Set("Connection", "Keep-Alive")
 
 	isAPIKey := codexAuthUsesAPIKey(auth)
-	if originator := strings.TrimSpace(ginHeaders.Get("Originator")); originator != "" {
-		r.Header.Set("Originator", originator)
-	} else if !isAPIKey {
-		r.Header.Set("Originator", codexOriginator)
-	}
 	if !isAPIKey {
 		if auth != nil && auth.Metadata != nil {
 			if accountID, ok := auth.Metadata["account_id"].(string); ok {
@@ -589,12 +592,8 @@ func applyCodexHeadersWithSIWC(r *http.Request, auth *cliproxyauth.Auth, useSIWC
 			}
 		}
 	}
-	var attrs map[string]string
-	if auth != nil {
-		attrs = auth.Attributes
-	}
-	util.ApplyCustomHeadersFromAttrs(r, attrs, ginHeaders)
-	applyCodexCloakingHeaders(r.Header, cfg, auth)
+	util.ApplyCustomHeadersFromAttrs(r, filterCodexAttrs(auth), ginHeaders)
+	helps.ApplyCodexUALabHeaders(r.Header, cfg)
 }
 
 const codexRoutingHintHeader = "X-Codex-Routing-Hint"
@@ -667,14 +666,6 @@ func isCodexCloakingDisabled(cfg *config.Config, auth *cliproxyauth.Auth) bool {
 		return true
 	}
 	return false
-}
-
-func applyCodexCloakingHeaders(headers http.Header, cfg *config.Config, auth *cliproxyauth.Auth) {
-	if headers == nil || cfg == nil || isCodexCloakingDisabled(cfg, auth) {
-		return
-	}
-	headers.Set("User-Agent", codexUserAgent)
-	headers.Set("Originator", codexOriginator)
 }
 
 func normalizeCodexInstructions(body []byte, nativeRequest ...bool) []byte {
