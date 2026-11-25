@@ -17,7 +17,7 @@ import (
 	"github.com/MoeForge/moego/json"
 	"github.com/MoeForge/moego/ojson"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/proxyutil"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/singleflight"
 )
@@ -37,7 +37,16 @@ const (
 type CodexAuth struct {
 	httpClient        *http.Client
 	siwcAgentNameHint string
+	userAgent         string
 	refreshJournal    RefreshJournal
+}
+
+type failingRoundTripper struct {
+	err error
+}
+
+func (f failingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, f.err
 }
 
 var codexRefreshGroup singleflight.Group
@@ -52,25 +61,50 @@ func NewCodexAuth(cfg *config.Config) *CodexAuth {
 // proxyURL takes precedence over cfg.ProxyURL when non-empty.
 func NewCodexAuthWithProxyURL(cfg *config.Config, proxyURL string) *CodexAuth {
 	effectiveProxyURL := strings.TrimSpace(proxyURL)
-	var sdkCfg config.SDKConfig
 	agentNameHint := SIWCAgentNameHint
+	userAgent := ""
 	if cfg != nil {
-		sdkCfg = cfg.SDKConfig
 		if effectiveProxyURL == "" {
 			effectiveProxyURL = strings.TrimSpace(cfg.ProxyURL)
 		}
 		agentNameHint = cfg.Codex.EffectiveSignInWithChatGPTIdentifier()
+		if ua := strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent); ua != "" && !strings.EqualFold(ua, "auto") && config.ValidUserAgent(ua) {
+			userAgent = ua
+		}
 	}
-	sdkCfg.ProxyURL = effectiveProxyURL
+	httpClient := &http.Client{}
+	if effectiveProxyURL != "" {
+		transport, _, errBuild := proxyutil.BuildHTTPTransport(effectiveProxyURL)
+		if errBuild != nil {
+			log.Errorf("codex oauth: invalid proxy %q: %v", proxyutil.Redact(effectiveProxyURL), errBuild)
+			httpClient.Transport = failingRoundTripper{err: fmt.Errorf("codex oauth: invalid proxy %q: %w", proxyutil.Redact(effectiveProxyURL), errBuild)}
+		} else if transport != nil {
+			httpClient.Transport = transport
+		}
+	}
 	var journal RefreshJournal
 	if cfg != nil && strings.TrimSpace(cfg.AuthDir) != "" {
 		journal = &FileRefreshJournal{Dir: cfg.AuthDir}
 	}
 	return &CodexAuth{
-		httpClient:        util.SetProxy(&sdkCfg, &http.Client{}),
+		httpClient:        httpClient,
 		siwcAgentNameHint: agentNameHint,
+		userAgent:         userAgent,
 		refreshJournal:    journal,
 	}
+}
+
+// applyOAuthUserAgent applies the operator's configured Codex UALab User-Agent
+// (or suppresses Go's default "Go-http-client/1.1" when unconfigured).
+func (o *CodexAuth) applyOAuthUserAgent(req *http.Request) {
+	if req == nil {
+		return
+	}
+	if o != nil && o.userAgent != "" {
+		req.Header.Set("User-Agent", o.userAgent)
+		return
+	}
+	req.Header.Set("User-Agent", "")
 }
 
 // GenerateAuthURL creates the OAuth authorization URL with PKCE (Proof Key for Code Exchange).
@@ -132,6 +166,7 @@ func (o *CodexAuth) ExchangeCodeForTokensWithRedirect(ctx context.Context, code,
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
+	o.applyOAuthUserAgent(req)
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -245,6 +280,7 @@ func (o *CodexAuth) refreshTokensSingleFlight(ctx context.Context, refreshToken 
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
+	o.applyOAuthUserAgent(req)
 
 	resp, errDo := o.doRefreshRequest(req)
 	if errDo != nil {

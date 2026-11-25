@@ -174,16 +174,31 @@ type utlsRoundTripper struct {
 	transport    *http.Transport
 }
 
+type failingProxyDialer struct {
+	err error
+}
+
+func (d *failingProxyDialer) Dial(_, _ string) (net.Conn, error) {
+	return nil, d.err
+}
+
+func (d *failingProxyDialer) DialContext(_ context.Context, _, _ string) (net.Conn, error) {
+	return nil, d.err
+}
+
 func newUtlsRoundTripper(cfg *config.SDKConfig) *utlsRoundTripper {
 	var dialer proxy.Dialer = proxy.Direct
 	var proxyURL string
 	if cfg != nil {
-		proxyURL = cfg.ProxyURL
-		proxyDialer, mode, errBuild := proxyutil.BuildDialer(cfg.ProxyURL)
-		if errBuild != nil {
-			log.Errorf("failed to configure proxy dialer for %q: %v", proxyutil.Redact(cfg.ProxyURL), errBuild)
-		} else if mode != proxyutil.ModeInherit && proxyDialer != nil {
-			dialer = proxyDialer
+		proxyURL = strings.TrimSpace(cfg.ProxyURL)
+		if proxyURL != "" {
+			proxyDialer, mode, errBuild := proxyutil.BuildDialer(proxyURL)
+			if errBuild != nil {
+				log.Errorf("failed to configure proxy dialer for %q: %v", proxyutil.Redact(proxyURL), errBuild)
+				dialer = &failingProxyDialer{err: fmt.Errorf("claude oauth: invalid proxy %q: %w", proxyutil.Redact(proxyURL), errBuild)}
+			} else if mode != proxyutil.ModeInherit && proxyDialer != nil {
+				dialer = proxyDialer
+			}
 		}
 	}
 

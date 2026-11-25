@@ -192,6 +192,31 @@ func newCodexOrderedTransport(proxyURL string, order []string) *http.Transport {
 	return newCodexOrderedTransportForDialer(geminiDialerForProxy(proxyURL), order, nil)
 }
 
+var codexAPICallTransportCache = internalcache.NewBoundedLRU[string, http.RoundTripper](
+	codexOrderedTransportCacheCapacity,
+	func(_ string, rt http.RoundTripper) {
+		if tr, ok := rt.(interface{ CloseIdleConnections() }); ok {
+			tr.CloseIdleConnections()
+		}
+	},
+)
+
+// NewCodexAPICallTransport returns an HTTP/1.1 transport for management APICall
+// requests targeting Codex/ChatGPT (e.g. wham/usage, subscriptions, reset
+// credits). It applies the pasted UALab HeaderOrder, uses Chrome HTTP/1.1 ALPN
+// uTLS for chatgpt.com, never reads environment proxies, and fails closed on
+// invalid proxy configurations to prevent IP leakage.
+func NewCodexAPICallTransport(cfg *config.Config, proxyURL string) http.RoundTripper {
+	var order []string
+	if cfg != nil && len(cfg.CodexHeaderDefaults.HeaderOrder) > 0 {
+		order = append([]string(nil), cfg.CodexHeaderDefaults.HeaderOrder...)
+	}
+	cacheKey := strings.TrimSpace(proxyURL) + "\x00" + strings.Join(order, ",")
+	return codexAPICallTransportCache.GetOrAdd(cacheKey, func() http.RoundTripper {
+		return newCodexOrderedTransportForDialer(strictAPICallDialerForProxy(proxyURL), order, nil)
+	})
+}
+
 func newCodexOrderedTransportForDialer(dialer proxy.Dialer, order []string, tlsConfigTemplate *tls.Config) *http.Transport {
 	var orderFn httpwire.RequestHeaderOrder
 	if len(order) > 0 {

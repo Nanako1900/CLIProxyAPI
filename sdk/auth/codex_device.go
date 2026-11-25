@@ -16,8 +16,8 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/auth/codex"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/browser"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v8/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/proxyutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -61,14 +61,35 @@ func shouldUseCodexDeviceFlow(opts *LoginOptions) bool {
 	return strings.EqualFold(strings.TrimSpace(opts.Metadata[codexLoginModeMetadataKey]), codexLoginModeDevice)
 }
 
+func codexDeviceUserAgent(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	ua := strings.TrimSpace(cfg.CodexHeaderDefaults.UserAgent)
+	if ua == "" || strings.EqualFold(ua, "auto") || !config.ValidUserAgent(ua) {
+		return ""
+	}
+	return ua
+}
+
 func (a *CodexAuthenticator) loginWithDeviceFlow(ctx context.Context, cfg *config.Config, opts *LoginOptions) (*coreauth.Auth, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	httpClient := util.SetProxy(&cfg.SDKConfig, &http.Client{})
+	httpClient := &http.Client{}
+	if cfg != nil && strings.TrimSpace(cfg.ProxyURL) != "" {
+		transport, _, errProxy := proxyutil.BuildHTTPTransport(cfg.ProxyURL)
+		if errProxy != nil {
+			return nil, fmt.Errorf("codex device flow: invalid proxy %q: %w", proxyutil.Redact(cfg.ProxyURL), errProxy)
+		}
+		if transport != nil {
+			httpClient.Transport = transport
+		}
+	}
+	userAgent := codexDeviceUserAgent(cfg)
 
-	userCodeResp, err := requestCodexDeviceUserCode(ctx, httpClient)
+	userCodeResp, err := requestCodexDeviceUserCode(ctx, httpClient, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +117,7 @@ func (a *CodexAuthenticator) loginWithDeviceFlow(ctx context.Context, cfg *confi
 		}
 	}
 
-	tokenResp, err := pollCodexDeviceToken(ctx, httpClient, deviceAuthID, deviceCode, pollInterval)
+	tokenResp, err := pollCodexDeviceToken(ctx, httpClient, deviceAuthID, deviceCode, pollInterval, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +146,7 @@ func (a *CodexAuthenticator) loginWithDeviceFlow(ctx context.Context, cfg *confi
 	return a.buildAuthRecord(authSvc, authBundle)
 }
 
-func requestCodexDeviceUserCode(ctx context.Context, client *http.Client) (*codexDeviceUserCodeResponse, error) {
+func requestCodexDeviceUserCode(ctx context.Context, client *http.Client, userAgent string) (*codexDeviceUserCodeResponse, error) {
 	body, err := json.Marshal(codexDeviceUserCodeRequest{ClientID: codex.ClientID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode codex device request: %w", err)
@@ -137,6 +158,7 @@ func requestCodexDeviceUserCode(ctx context.Context, client *http.Client) (*code
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -168,7 +190,7 @@ func requestCodexDeviceUserCode(ctx context.Context, client *http.Client) (*code
 	return &parsed, nil
 }
 
-func pollCodexDeviceToken(ctx context.Context, client *http.Client, deviceAuthID, userCode string, interval time.Duration) (*codexDeviceTokenResponse, error) {
+func pollCodexDeviceToken(ctx context.Context, client *http.Client, deviceAuthID, userCode string, interval time.Duration, userAgent string) (*codexDeviceTokenResponse, error) {
 	deadline := time.Now().Add(codexDeviceTimeout)
 
 	for {
@@ -190,6 +212,7 @@ func pollCodexDeviceToken(ctx context.Context, client *http.Client, deviceAuthID
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", userAgent)
 
 		resp, err := client.Do(req)
 		if err != nil {

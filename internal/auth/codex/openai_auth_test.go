@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	sdkconfig "github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -376,5 +378,98 @@ func TestRefreshTokensWithRetry_TerminalGrantErrorsOnlyAttemptOnce(t *testing.T)
 				t.Fatalf("%s: RefreshTokensWithRetry attempts = %d, want %d", tc.name, got, tc.wantCalls)
 			}
 		})
+	}
+}
+
+func TestCodexOAuthUsesConfiguredUALabUserAgentAndSuppressesGoDefault(t *testing.T) {
+	resetCodexRefreshGroupForTest()
+	t.Cleanup(resetCodexRefreshGroupForTest)
+
+	const customUA = "codex-tui/0.172.0 (Mac OS 27.3.0; arm64) Apple_Terminal/489.11 (codex-tui; 0.172.0)"
+
+	var gotRefreshUA string
+	var gotExchangeUA string
+	auth := NewCodexAuth(&config.Config{
+		CodexHeaderDefaults: config.CodexHeaderDefaults{
+			UserAgent: customUA,
+		},
+	})
+	auth.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			rawBody, _ := io.ReadAll(req.Body)
+			if strings.Contains(string(rawBody), "grant_type=refresh_token") {
+				gotRefreshUA = req.Header.Get("User-Agent")
+			} else {
+				gotExchangeUA = req.Header.Get("User-Agent")
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"access_token":"at","refresh_token":"rt","token_type":"Bearer","expires_in":3600}`)),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	if _, err := auth.RefreshTokens(context.Background(), "ua-test-refresh"); err != nil {
+		t.Fatalf("RefreshTokens failed: %v", err)
+	}
+	if gotRefreshUA != customUA {
+		t.Fatalf("RefreshTokens User-Agent = %q, want %q", gotRefreshUA, customUA)
+	}
+
+	if _, err := auth.ExchangeCodeForTokensWithRedirect(context.Background(), "auth-code", "http://localhost:1455/auth/callback", &PKCECodes{CodeVerifier: "v"}); err != nil {
+		t.Fatalf("ExchangeCodeForTokensWithRedirect failed: %v", err)
+	}
+	if gotExchangeUA != customUA {
+		t.Fatalf("ExchangeCodeForTokensWithRedirect User-Agent = %q, want %q", gotExchangeUA, customUA)
+	}
+
+	// Unconfigured (or legacy "auto") must explicitly set empty User-Agent header
+	// so net/http suppresses Go-http-client/1.1.
+	var gotUnconfiguredHeader []string
+	var sawKey bool
+	unconfigured := NewCodexAuth(&config.Config{
+		CodexHeaderDefaults: config.CodexHeaderDefaults{UserAgent: "auto"},
+	})
+	unconfigured.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			gotUnconfiguredHeader, sawKey = req.Header["User-Agent"]
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"access_token":"at","refresh_token":"rt","token_type":"Bearer","expires_in":3600}`)),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}),
+	}
+	if _, err := unconfigured.RefreshTokens(context.Background(), "ua-test-unconfigured"); err != nil {
+		t.Fatalf("unconfigured RefreshTokens failed: %v", err)
+	}
+	if !sawKey || len(gotUnconfiguredHeader) != 1 || gotUnconfiguredHeader[0] != "" {
+		t.Fatalf("unconfigured User-Agent header = %#v (present=%v), want explicit empty string to suppress Go-http-client", gotUnconfiguredHeader, sawKey)
+	}
+}
+
+func TestNewCodexAuthWithProxyURL_InvalidProxyFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	var upstreamHit atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHit.Store(true)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	auth := NewCodexAuthWithProxyURL(&config.Config{
+		SDKConfig: sdkconfig.SDKConfig{ProxyURL: "bad-scheme://127.0.0.1:9999"},
+	}, "")
+	resp, err := auth.httpClient.Get(srv.URL)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("expected CodexAuth with invalid proxy to fail closed, got nil error")
+	}
+	if upstreamHit.Load() {
+		t.Fatal("upstream was contacted directly after invalid proxy configuration (IP leak)")
 	}
 }

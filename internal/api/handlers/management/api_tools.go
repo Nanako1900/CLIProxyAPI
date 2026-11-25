@@ -15,7 +15,9 @@ import (
 	xaiauth "github.com/router-for-me/CLIProxyAPI/v8/internal/auth/xai"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/proxyutil"
 	log "github.com/sirupsen/logrus"
@@ -210,10 +212,20 @@ func (h *Handler) APICall(c *gin.Context) {
 		req.Host = hostOverride
 	}
 
-	httpClient := &http.Client{
-		Timeout: defaultAPICallTimeout,
+	provider := detectAPICallProvider(parsedURL, auth)
+	applyAPICallProviderHeaders(req, provider, h.cfg, auth)
+
+	resolvedProxy, errProxy := h.resolveAPICallProxyURL(auth, requestProxyURL)
+	if errProxy != nil {
+		log.WithError(errProxy).Warn("management APICall refused to fall back to direct after invalid proxy configuration")
+		c.JSON(http.StatusBadGateway, gin.H{"error": "invalid proxy configuration"})
+		return
 	}
-	httpClient.Transport = h.apiCallTransport(auth, requestProxyURL)
+
+	httpClient := &http.Client{
+		Timeout:   defaultAPICallTimeout,
+		Transport: h.apiCallProviderTransport(parsedURL, provider, resolvedProxy),
+	}
 
 	resp, errDo := httpClient.Do(req)
 	if errDo != nil {
@@ -227,7 +239,17 @@ func (h *Handler) APICall(c *gin.Context) {
 		}
 	}()
 
-	respBody, errReadAll := io.ReadAll(resp.Body)
+	bodyReader := resp.Body
+	if strings.TrimSpace(resp.Header.Get("Content-Encoding")) != "" {
+		if decoded, errDecode := helps.DecodeResponseBody(resp.Body, resp.Header); errDecode == nil {
+			bodyReader = decoded
+			defer func() { _ = decoded.Close() }()
+			resp.Header.Del("Content-Encoding")
+			resp.Header.Del("Content-Length")
+		}
+	}
+
+	respBody, errReadAll := io.ReadAll(bodyReader)
 	if errReadAll != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read response"})
 		return
@@ -566,9 +588,13 @@ func (h *Handler) refreshAntigravityOAuthAccessToken(ctx context.Context, auth *
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
+	resolvedProxy, errProxy := h.resolveAPICallProxyURL(auth, requestProxyURL)
+	if errProxy != nil {
+		return "", fmt.Errorf("antigravity oauth token refresh: invalid proxy configuration: %w", errProxy)
+	}
 	httpClient := &http.Client{
 		Timeout:   defaultAPICallTimeout,
-		Transport: h.apiCallTransport(auth, requestProxyURL),
+		Transport: h.apiCallTransportForProxy(resolvedProxy),
 	}
 	resp, errDo := httpClient.Do(req)
 	if errDo != nil {
@@ -866,6 +892,152 @@ func (h *Handler) apiCallTransport(auth *coreauth.Auth, requestProxyURL string) 
 	}
 
 	return directAPICallTransport()
+}
+
+// resolveAPICallProxyURL resolves the effective proxy URL with strict priority:
+// requestProxyURL > auth.ProxyURL > API-key config proxy > global cfg.ProxyURL.
+// If an explicit proxy was configured but every candidate is invalid, it fails
+// closed with an error instead of silently falling back to the host IP.
+func (h *Handler) resolveAPICallProxyURL(auth *coreauth.Auth, requestProxyURL string) (string, error) {
+	if proxyStr := strings.TrimSpace(requestProxyURL); proxyStr != "" {
+		if _, errParse := proxyutil.Parse(proxyStr); errParse != nil {
+			return "", fmt.Errorf("invalid request proxy: %w", errParse)
+		}
+		return proxyStr, nil
+	}
+
+	var candidates []string
+	if auth != nil {
+		if proxyStr := strings.TrimSpace(auth.ProxyURL); proxyStr != "" {
+			candidates = append(candidates, proxyStr)
+		}
+		if h != nil && h.cfg != nil {
+			if proxyStr := strings.TrimSpace(proxyURLFromAPIKeyConfig(h.cfg, auth)); proxyStr != "" {
+				candidates = append(candidates, proxyStr)
+			}
+		}
+	}
+	if h != nil && h.cfg != nil {
+		if proxyStr := strings.TrimSpace(h.cfg.ProxyURL); proxyStr != "" {
+			candidates = append(candidates, proxyStr)
+		}
+	}
+
+	var lastErr error
+	for _, candidate := range candidates {
+		if _, errParse := proxyutil.Parse(candidate); errParse == nil {
+			return candidate, nil
+		} else {
+			lastErr = errParse
+		}
+	}
+	if len(candidates) > 0 {
+		return "", fmt.Errorf("no valid configured proxy available: %w", lastErr)
+	}
+	return "", nil
+}
+
+type failingAPICallRoundTripper struct {
+	err error
+}
+
+func (f failingAPICallRoundTripper) RoundTrip(_ *http.Request) (*http.Response, error) {
+	return nil, f.err
+}
+
+func (h *Handler) apiCallTransportForProxy(resolvedProxy string) http.RoundTripper {
+	if trimmed := strings.TrimSpace(resolvedProxy); trimmed != "" {
+		transport, _, errBuild := proxyutil.BuildHTTPTransport(trimmed)
+		if errBuild != nil {
+			return failingAPICallRoundTripper{
+				err: fmt.Errorf("invalid proxy configuration: %w", errBuild),
+			}
+		}
+		if transport != nil {
+			return transport
+		}
+	}
+	return directAPICallTransport()
+}
+
+func (h *Handler) apiCallProviderTransport(parsedURL *url.URL, provider, resolvedProxy string) http.RoundTripper {
+	if parsedURL != nil && strings.EqualFold(parsedURL.Scheme, "https") {
+		switch provider {
+		case "codex":
+			return helps.NewCodexAPICallTransport(h.cfg, resolvedProxy)
+		case "claude":
+			return helps.NewClaudeAPICallTransport(resolvedProxy)
+		case "gemini":
+			if h.cfg != nil && (len(h.cfg.GeminiHeaderDefaults.HeaderOrder) > 0 || h.cfg.GeminiHeaderDefaults.ForceHTTP1) {
+				return helps.NewGeminiAPICallTransport(h.cfg, resolvedProxy)
+			}
+		}
+	}
+	return h.apiCallTransportForProxy(resolvedProxy)
+}
+
+func detectAPICallProvider(parsedURL *url.URL, auth *coreauth.Auth) string {
+	if auth != nil {
+		switch strings.ToLower(strings.TrimSpace(auth.Provider)) {
+		case "codex":
+			return "codex"
+		case "claude":
+			return "claude"
+		case "gemini", "gemini-interactions", "vertex":
+			return "gemini"
+		case "antigravity":
+			return "antigravity"
+		}
+	}
+	if parsedURL != nil {
+		switch strings.ToLower(strings.TrimSpace(parsedURL.Hostname())) {
+		case "chatgpt.com", "auth.openai.com":
+			return "codex"
+		case "api.anthropic.com", "platform.claude.com":
+			return "claude"
+		case "generativelanguage.googleapis.com":
+			return "gemini"
+		case "daily-cloudcode-pa.googleapis.com", "daily-cloudcode-pa.sandbox.googleapis.com", "cloudcode-pa.googleapis.com":
+			return "antigravity"
+		}
+	}
+	return ""
+}
+
+// applyAPICallProviderHeaders strongly enforces the operator's configured
+// User-Agent and identity headers on management APICall requests (quota
+// refreshes, reset grants, reset credits) so stale frontend defaults or
+// Go-http-client never leak to upstream providers.
+func applyAPICallProviderHeaders(req *http.Request, provider string, cfg *config.Config, auth *coreauth.Auth) {
+	if req == nil {
+		return
+	}
+	switch provider {
+	case "codex":
+		if cfg != nil && helps.ResolveCodexUserAgent(cfg) != "" {
+			helps.ApplyCodexUALabHeaders(req.Header, cfg)
+		} else if strings.TrimSpace(req.Header.Get("User-Agent")) == "" {
+			req.Header.Set("User-Agent", "")
+		}
+	case "claude":
+		if ua := helps.ResolveClaudeEffectiveUserAgent(cfg, auth); ua != "" {
+			for key := range req.Header {
+				if strings.EqualFold(key, "User-Agent") {
+					delete(req.Header, key)
+				}
+			}
+			req.Header.Set("User-Agent", ua)
+		}
+	case "gemini":
+		if cfg != nil && helps.ResolveGeminiUserAgent(req.Context(), cfg, auth, "", nil) != "" {
+			helps.ApplyGeminiHeaders(req, cfg, auth, "", nil)
+		}
+	case "antigravity":
+		ua := strings.TrimSpace(req.Header.Get("User-Agent"))
+		if ua == "" || strings.HasPrefix(strings.ToLower(ua), "antigravity/hub/") {
+			req.Header.Set("User-Agent", misc.AntigravityUserAgent())
+		}
+	}
 }
 
 func directAPICallTransport() http.RoundTripper {

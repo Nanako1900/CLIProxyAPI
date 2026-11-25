@@ -144,6 +144,7 @@ func (o *CodexAuth) requestSIWCToken(ctx context.Context, form url.Values, clien
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
+	o.applyOAuthUserAgent(req)
 
 	stage = "transport"
 	request := o.httpClient.Do

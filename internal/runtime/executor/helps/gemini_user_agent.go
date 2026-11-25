@@ -236,12 +236,26 @@ func newGeminiOrderedTransportForDialer(dialer proxy.Dialer, order []string, tls
 	}
 }
 
+type failingProxyDialer struct {
+	err error
+}
+
+func (d *failingProxyDialer) Dial(_, _ string) (net.Conn, error) {
+	return nil, d.err
+}
+
+func (d *failingProxyDialer) DialContext(_ context.Context, _, _ string) (net.Conn, error) {
+	return nil, d.err
+}
+
 func geminiDialerForProxy(proxyURL string) proxy.Dialer {
-	if strings.TrimSpace(proxyURL) != "" {
-		proxyDialer, mode, errBuild := proxyutil.BuildDialer(proxyURL)
+	if trimmed := strings.TrimSpace(proxyURL); trimmed != "" {
+		proxyDialer, mode, errBuild := proxyutil.BuildDialer(trimmed)
 		if errBuild != nil {
-			log.Errorf("gemini ordered tls: failed to configure proxy dialer for %q: %v", proxyutil.Redact(proxyURL), errBuild)
-		} else if mode != proxyutil.ModeInherit && proxyDialer != nil {
+			log.Errorf("gemini ordered tls: failed to configure proxy dialer for %q: %v", proxyutil.Redact(trimmed), errBuild)
+			return &failingProxyDialer{err: fmt.Errorf("invalid proxy %q: %w", proxyutil.Redact(trimmed), errBuild)}
+		}
+		if mode != proxyutil.ModeInherit && proxyDialer != nil {
 			return proxyDialer
 		}
 	}
@@ -251,6 +265,49 @@ func geminiDialerForProxy(proxyURL string) proxy.Dialer {
 			KeepAlive: proxyPoolKeepAlivePeriod,
 		},
 	}
+}
+
+// strictAPICallDialerForProxy resolves a proxy dialer for management APICall
+// requests without ever reading process environment proxies (HTTP_PROXY /
+// HTTPS_PROXY) and failing closed if an explicit proxy URL fails to build.
+func strictAPICallDialerForProxy(proxyURL string) proxy.Dialer {
+	if trimmed := strings.TrimSpace(proxyURL); trimmed != "" {
+		proxyDialer, mode, errBuild := proxyutil.BuildDialer(trimmed)
+		if errBuild != nil {
+			log.Errorf("management api-call tls: failed to configure proxy dialer for %q: %v", proxyutil.Redact(trimmed), errBuild)
+			return &failingProxyDialer{err: fmt.Errorf("invalid proxy %q: %w", proxyutil.Redact(trimmed), errBuild)}
+		}
+		if mode == proxyutil.ModeProxy && proxyDialer != nil {
+			return proxyDialer
+		}
+	}
+	return &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: proxyPoolKeepAlivePeriod,
+	}
+}
+
+var geminiAPICallTransportCache = internalcache.NewBoundedLRU[string, http.RoundTripper](
+	geminiOrderedTransportCacheCapacity,
+	func(_ string, rt http.RoundTripper) {
+		if tr, ok := rt.(interface{ CloseIdleConnections() }); ok {
+			tr.CloseIdleConnections()
+		}
+	},
+)
+
+// NewGeminiAPICallTransport returns an HTTP/1.1 ordered-header transport for
+// management APICall requests targeting Gemini, strictly obeying proxyURL with
+// no environment-proxy fallback and fail-closed error handling.
+func NewGeminiAPICallTransport(cfg *config.Config, proxyURL string) http.RoundTripper {
+	var order []string
+	if cfg != nil && len(cfg.GeminiHeaderDefaults.HeaderOrder) > 0 {
+		order = append([]string(nil), cfg.GeminiHeaderDefaults.HeaderOrder...)
+	}
+	cacheKey := strings.TrimSpace(proxyURL) + "\x00" + strings.Join(order, ",")
+	return geminiAPICallTransportCache.GetOrAdd(cacheKey, func() http.RoundTripper {
+		return newGeminiOrderedTransportForDialer(strictAPICallDialerForProxy(proxyURL), order, nil)
+	})
 }
 
 type envProxyDialer struct {
