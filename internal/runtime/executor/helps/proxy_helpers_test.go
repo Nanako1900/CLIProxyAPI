@@ -249,3 +249,49 @@ func TestProxyConnectionPoolCustomDefaultTransportDeclinesPooling(t *testing.T) 
 		t.Fatalf("client.Transport = %T, want nil so client uses http.DefaultTransport", client.Transport)
 	}
 }
+
+func TestProxyAwareDevinAndUtlsFallbackFailClosedOnInvalidProxy(t *testing.T) {
+	t.Parallel()
+
+	var upstreamHit atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHit.Store(true)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{SDKConfig: sdkconfig.SDKConfig{ProxyURL: "invalid-scheme://127.0.0.1:9999"}}
+	auth := &cliproxyauth.Auth{ID: "bad-proxy-auth", ProxyURL: "invalid-scheme://127.0.0.1:9999"}
+
+	// Even when context carries a fallback RoundTripper, an explicit invalid proxy MUST fail closed.
+	ctxWithFallbackRT := context.WithValue(context.Background(), "cliproxy.roundtripper", http.DefaultTransport)
+
+	cases := []struct {
+		name   string
+		client *http.Client
+	}{
+		{
+			name:   "NewProxyAwareHTTPClient",
+			client: NewProxyAwareHTTPClient(ctxWithFallbackRT, cfg, auth, 0),
+		},
+		{
+			name:   "NewDevinHTTPClient",
+			client: NewDevinHTTPClient(context.Background(), cfg, auth, 0),
+		},
+		{
+			name:   "NewUtlsHTTPClient_fallback_host",
+			client: NewUtlsHTTPClient(context.Background(), cfg, auth, 0),
+		},
+	}
+
+	for _, tc := range cases {
+		resp, err := tc.client.Get(srv.URL)
+		if err == nil {
+			_ = resp.Body.Close()
+			t.Fatalf("%s: expected invalid proxy to fail closed, got nil error", tc.name)
+		}
+	}
+	if upstreamHit.Load() {
+		t.Fatal("upstream was contacted directly after invalid proxy configuration (IP leak)")
+	}
+}

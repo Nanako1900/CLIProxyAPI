@@ -3,6 +3,7 @@ package live
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -433,6 +434,7 @@ func (h *Handler) HandleSideband(c *gin.Context) {
 		if errPrepare := h.authManager.PrepareHttpRequest(ctx, current, req); errPrepare != nil {
 			return nil, nil, errPrepare
 		}
+		sanitizeCodexRealtimeWebsocketHeaders(req.Header, runtimeConfig, current)
 		authType, authValue := current.AccountInfo()
 		helps.RecordAPIWebsocketRequest(ctx, runtimeConfig, helps.UpstreamRequestLog{
 			URL:       upstreamURL,
@@ -444,7 +446,7 @@ func (h *Handler) HandleSideband(c *gin.Context) {
 			AuthType:  authType,
 			AuthValue: authValue,
 		})
-		dialer := newProxyAwareSidebandDialer(runtimeConfig, current)
+		dialer := newProxyAwareSidebandDialer(ctx, runtimeConfig, current)
 		dialer.Subprotocols = websocket.Subprotocols(c.Request)
 		return dialer.DialContext(ctx, upstreamURL, req.Header)
 	}
@@ -692,11 +694,32 @@ func isNormalWebsocketClose(err error) bool {
 	return websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived)
 }
 
-func newProxyAwareSidebandDialer(cfg *config.Config, selected *auth.Auth) *websocket.Dialer {
-	return newSidebandDialer(proxyURLForAuth(cfg, selected))
+func sanitizeCodexRealtimeWebsocketHeaders(headers http.Header, cfg *config.Config, current *auth.Auth) {
+	if headers == nil {
+		return
+	}
+	helps.ApplyCodexUALabWebsocketHeadersForAuth(headers, cfg, current)
+	if strings.TrimSpace(headers.Get("User-Agent")) == "" {
+		headers.Set("User-Agent", "")
+	}
 }
 
-func proxyURLForAuth(cfg *config.Config, selected *auth.Auth) string {
+func failClosedSidebandDialer(dialer *websocket.Dialer, err error) *websocket.Dialer {
+	dialer.Proxy = nil
+	dialer.NetDialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+		return nil, err
+	}
+	return dialer
+}
+
+func newProxyAwareSidebandDialer(ctx context.Context, cfg *config.Config, selected *auth.Auth) *websocket.Dialer {
+	return newSidebandDialer(proxyURLForAuth(ctx, cfg, selected))
+}
+
+func proxyURLForAuth(ctx context.Context, cfg *config.Config, selected *auth.Auth) string {
+	if reqProxy := strings.TrimSpace(coreexecutor.RequestProxyURL(ctx)); reqProxy != "" {
+		return reqProxy
+	}
 	if selected != nil && strings.TrimSpace(selected.ProxyURL) != "" {
 		return strings.TrimSpace(selected.ProxyURL)
 	}
@@ -715,7 +738,7 @@ func newSidebandDialer(proxyURL string) *websocket.Dialer {
 	setting, errParse := proxyutil.Parse(proxyURL)
 	if errParse != nil {
 		log.Errorf("codex live sideband: %v", errParse)
-		return dialer
+		return failClosedSidebandDialer(dialer, fmt.Errorf("codex live sideband: invalid proxy %q: %w", proxyutil.Redact(proxyURL), errParse))
 	}
 	switch setting.Mode {
 	case proxyutil.ModeDirect:
@@ -737,7 +760,7 @@ func newSidebandDialer(proxyURL string) *websocket.Dialer {
 		socksDialer, errSOCKS5 := xproxy.SOCKS5("tcp", setting.URL.Host, proxyAuth, xproxy.Direct)
 		if errSOCKS5 != nil {
 			log.Errorf("codex live sideband: create SOCKS5 dialer failed: %v", errSOCKS5)
-			return dialer
+			return failClosedSidebandDialer(dialer, fmt.Errorf("codex live sideband: create SOCKS5 dialer for %q failed: %w", proxyutil.Redact(proxyURL), errSOCKS5))
 		}
 		dialer.Proxy = nil
 		if contextDialer, ok := socksDialer.(xproxy.ContextDialer); ok {
@@ -751,6 +774,7 @@ func newSidebandDialer(proxyURL string) *websocket.Dialer {
 		dialer.Proxy = http.ProxyURL(setting.URL)
 	default:
 		log.Errorf("codex live sideband: unsupported proxy scheme: %s", setting.URL.Scheme)
+		return failClosedSidebandDialer(dialer, fmt.Errorf("codex live sideband: unsupported proxy scheme: %s", setting.URL.Scheme))
 	}
 	return dialer
 }

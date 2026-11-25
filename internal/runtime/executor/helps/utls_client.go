@@ -532,11 +532,15 @@ func NewUtlsHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyau
 	var standardTransport http.RoundTripper = http.DefaultTransport
 	var anthropicFn, fallbackFn func() http.RoundTripper
 	if proxyURL != "" {
+		failRT := failingProxyRoundTripper{
+			err: fmt.Errorf("utls fallback: invalid proxy %q", proxyutil.Redact(proxyURL)),
+		}
+		standardTransport = failRT
 		fallbackFn = func() http.RoundTripper {
 			if transport := pooledProxyTransport(proxyURL, cfg, auth); transport != nil {
 				return transport
 			}
-			return standardTransport
+			return failRT
 		}
 		// The Anthropic path has its own TLS fingerprint, so it needs its own pool kind.
 		anthropicFn = func() http.RoundTripper {

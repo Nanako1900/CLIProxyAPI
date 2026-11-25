@@ -298,7 +298,7 @@ func (h *Handler) Handle(c *gin.Context) {
 		}
 		var upstreamOffer string
 		mediaSession, upstreamOffer, errSDP = mediaRelay.NewSession(ctx, clientOffer, mediaSessionRoute{
-			proxyURL:   proxyURLForAuth(runtimeConfig, selected),
+			proxyURL:   proxyURLForAuth(ctx, runtimeConfig, selected),
 			credential: mediaCredentialName(selected, selectedIndex),
 			authIndex:  selectedIndex,
 		})

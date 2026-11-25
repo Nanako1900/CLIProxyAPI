@@ -110,6 +110,7 @@ func (h *Handler) HandleDirectWebsocket(c *gin.Context) {
 		}
 		authType, authValue := current.AccountInfo()
 		helpersConfig := h.currentConfig()
+		sanitizeCodexRealtimeWebsocketHeaders(request.Header, helpersConfig, current)
 		helps.RecordAPIWebsocketRequest(ctx, helpersConfig, helps.UpstreamRequestLog{
 			URL:       upstreamURL,
 			Method:    "WEBSOCKET",
@@ -120,7 +121,7 @@ func (h *Handler) HandleDirectWebsocket(c *gin.Context) {
 			AuthType:  authType,
 			AuthValue: authValue,
 		})
-		dialer := newProxyAwareSidebandDialer(helpersConfig, current)
+		dialer := newProxyAwareSidebandDialer(ctx, helpersConfig, current)
 		dialer.Subprotocols = websocket.Subprotocols(c.Request)
 		return dialer.DialContext(ctx, upstreamURL, request.Header)
 	}
@@ -258,9 +259,6 @@ func (h *Handler) directRealtimeURL(model string) string {
 func directRealtimeHeaders(source http.Header) http.Header {
 	headers := protocolHeaders(source)
 	headers.Del("OpenAI-Alpha")
-	if headers.Get("Originator") == "" {
-		headers.Set("Originator", "Codex Desktop")
-	}
 	return headers
 }
 

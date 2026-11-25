@@ -243,6 +243,14 @@ func executionProxyURL(ctx context.Context, cfg *config.Config, auth *cliproxyau
 	return proxyURL
 }
 
+func failClosedWebsocketDialer(dialer *websocket.Dialer, err error) *websocket.Dialer {
+	dialer.Proxy = nil
+	dialer.NetDialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+		return nil, err
+	}
+	return dialer
+}
+
 func newProxyAwareWebsocketDialer(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth) *websocket.Dialer {
 	dialer := &websocket.Dialer{
 		Proxy:             http.ProxyFromEnvironment,
@@ -262,7 +270,7 @@ func newProxyAwareWebsocketDialer(ctx context.Context, cfg *config.Config, auth 
 	setting, errParse := proxyutil.Parse(proxyURL)
 	if errParse != nil {
 		log.Errorf("codex websockets executor: %v", errParse)
-		return dialer
+		return failClosedWebsocketDialer(dialer, fmt.Errorf("codex websockets executor: invalid proxy %q: %w", proxyutil.Redact(proxyURL), errParse))
 	}
 
 	switch setting.Mode {
@@ -285,16 +293,21 @@ func newProxyAwareWebsocketDialer(ctx context.Context, cfg *config.Config, auth 
 		socksDialer, errSOCKS5 := proxy.SOCKS5("tcp", setting.URL.Host, proxyAuth, proxy.Direct)
 		if errSOCKS5 != nil {
 			log.Errorf("codex websockets executor: create SOCKS5 dialer failed: %v", errSOCKS5)
-			return dialer
+			return failClosedWebsocketDialer(dialer, fmt.Errorf("codex websockets executor: create SOCKS5 dialer for %q failed: %w", proxyutil.Redact(proxyURL), errSOCKS5))
 		}
 		dialer.Proxy = nil
-		dialer.NetDialContext = func(_ context.Context, network, addr string) (net.Conn, error) {
-			return socksDialer.Dial(network, addr)
+		if contextDialer, ok := socksDialer.(proxy.ContextDialer); ok {
+			dialer.NetDialContext = contextDialer.DialContext
+		} else {
+			dialer.NetDialContext = func(_ context.Context, network, addr string) (net.Conn, error) {
+				return socksDialer.Dial(network, addr)
+			}
 		}
 	case "http", "https":
 		dialer.Proxy = http.ProxyURL(setting.URL)
 	default:
 		log.Errorf("codex websockets executor: unsupported proxy scheme: %s", setting.URL.Scheme)
+		return failClosedWebsocketDialer(dialer, fmt.Errorf("codex websockets executor: unsupported proxy scheme: %s", setting.URL.Scheme))
 	}
 
 	return dialer

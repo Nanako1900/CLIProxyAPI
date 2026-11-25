@@ -121,3 +121,97 @@ func TestCodexAlphaSearchSIWCWithRealExecutor(t *testing.T) {
 		})
 	}
 }
+
+func TestCodexAlphaSearchDoesNotLeakHardcodedOriginatorOrDownstreamUA(t *testing.T) {
+	const customUA = "codex-tui/0.172.0 (Mac OS 27.3.0; arm64)"
+
+	t.Run("unconfigured_suppresses_go_client_and_hardcoded_originator", func(t *testing.T) {
+		server := newTestServer(t)
+		server.handlers.AuthManager.RegisterExecutor(executor.NewCodexAutoExecutor(server.getConfig()))
+		cred := &auth.Auth{
+			ID:       "codex-alpha-unconfigured",
+			Provider: "codex",
+			Status:   auth.StatusActive,
+			Metadata: map[string]any{"type": "codex", "access_token": "tok", "account_id": "acc"},
+		}
+		registry.GetGlobalRegistry().RegisterClient(cred.ID, "codex", []*registry.ModelInfo{{ID: "gpt-6.1-sol"}})
+		t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(cred.ID) })
+		if _, err := server.handlers.AuthManager.Register(t.Context(), cred); err != nil {
+			t.Fatal(err)
+		}
+
+		var gotHeader http.Header
+		ctx := context.WithValue(t.Context(), "cliproxy.roundtripper", codexSearchSIWCTransport(func(req *http.Request) (*http.Response, error) {
+			gotHeader = req.Header.Clone()
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": {"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"results":[]}`)),
+				Request:    req,
+			}, nil
+		}))
+		req := httptest.NewRequest(http.MethodPost, "/v1/alpha/search", strings.NewReader(`{"model":"gpt-6.1-sol","commands":{"search_query":[{"q":"hi"}]}}`)).WithContext(ctx)
+		req.Header.Set("Authorization", "Bearer test-key")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "Mozilla/5.0 DownstreamLeak")
+		rec := httptest.NewRecorder()
+		server.engine.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if got := gotHeader.Get("Originator"); got != "" {
+			t.Fatalf("Originator = %q, want empty when unconfigured", got)
+		}
+		if vals, ok := gotHeader["User-Agent"]; !ok || len(vals) != 1 || vals[0] != "" {
+			t.Fatalf("User-Agent = %#v (ok=%v), want explicit empty string (no downstream leak, no Go-http-client)", vals, ok)
+		}
+	})
+
+	t.Run("configured_per_account_ualab_enforced", func(t *testing.T) {
+		server := newTestServer(t)
+		cfg := server.getConfig()
+		cfg.CodexHeaderDefaults.UserAgent = "codex-tui/0.160.0 (old)"
+		cfg.CodexHeaderDefaults.Originator = "codex_tui_old"
+		server.handlers.AuthManager.RegisterExecutor(executor.NewCodexAutoExecutor(cfg))
+		cred := &auth.Auth{
+			ID:       "codex-alpha-per-account",
+			Provider: "codex",
+			Status:   auth.StatusActive,
+			Metadata: map[string]any{"type": "codex", "access_token": "tok", "account_id": "acc"},
+			Attributes: map[string]string{
+				"header:User-Agent": customUA,
+				"header:Originator": "codex_tui_new",
+			},
+		}
+		registry.GetGlobalRegistry().RegisterClient(cred.ID, "codex", []*registry.ModelInfo{{ID: "gpt-6.1-sol"}})
+		t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(cred.ID) })
+		if _, err := server.handlers.AuthManager.Register(t.Context(), cred); err != nil {
+			t.Fatal(err)
+		}
+
+		var gotHeader http.Header
+		ctx := context.WithValue(t.Context(), "cliproxy.roundtripper", codexSearchSIWCTransport(func(req *http.Request) (*http.Response, error) {
+			gotHeader = req.Header.Clone()
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": {"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"results":[]}`)),
+				Request:    req,
+			}, nil
+		}))
+		req := httptest.NewRequest(http.MethodPost, "/v1/alpha/search", strings.NewReader(`{"model":"gpt-6.1-sol","commands":{"search_query":[{"q":"hi"}]}}`)).WithContext(ctx)
+		req.Header.Set("Authorization", "Bearer test-key")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "Mozilla/5.0 DownstreamLeak")
+		rec := httptest.NewRecorder()
+		server.engine.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if gotHeader.Get("User-Agent") != customUA || gotHeader.Get("Originator") != "codex_tui_new" {
+			t.Fatalf("got UA=%q Originator=%q, want %q / codex_tui_new", gotHeader.Get("User-Agent"), gotHeader.Get("Originator"), customUA)
+		}
+	})
+}

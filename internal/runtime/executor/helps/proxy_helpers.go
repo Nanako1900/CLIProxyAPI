@@ -19,20 +19,22 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type failingProxyRoundTripper struct {
+	err error
+}
+
+func (f failingProxyRoundTripper) RoundTrip(_ *http.Request) (*http.Response, error) {
+	return nil, f.err
+}
+
 // NewProxyAwareHTTPClient creates an HTTP client with proper proxy configuration priority:
 // 1. Use the execution-scoped request proxy if configured (highest priority)
 // 2. Use auth.ProxyURL if configured
 // 3. Use cfg.ProxyURL if auth proxy is not configured
 // 4. Use RoundTripper from context if none are configured
 //
-// Parameters:
-//   - ctx: The context containing optional RoundTripper
-//   - cfg: The application configuration
-//   - auth: The authentication information
-//   - timeout: The client timeout (0 means no timeout)
-//
-// Returns:
-//   - *http.Client: An HTTP client with configured proxy or transport
+// If an explicit proxy URL is configured (priority 1-3) but invalid, the client
+// fails closed rather than falling back to a direct connection or environment proxy.
 func NewProxyAwareHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, timeout time.Duration) (clientOut *http.Client) {
 	defer func() { clientOut = httptransport.Decorate(ctx, clientOut) }()
 	httpClient := &http.Client{}
@@ -49,8 +51,15 @@ func NewProxyAwareHTTPClient(ctx context.Context, cfg *config.Config, auth *clip
 			httpClient.Transport = transport
 			return httpClient
 		}
-		// If proxy setup failed, log and fall through to context RoundTripper
-		log.Debugf("failed to setup proxy from URL: %s, falling back to context transport", proxyutil.Redact(proxyURL))
+		_, _, errBuild := proxyutil.BuildHTTPTransport(proxyURL)
+		if errBuild == nil {
+			errBuild = fmt.Errorf("proxy setting %q produced no transport", proxyutil.Redact(proxyURL))
+		}
+		log.Errorf("proxy client: failing closed for invalid proxy %q: %v", proxyutil.Redact(proxyURL), errBuild)
+		httpClient.Transport = failingProxyRoundTripper{
+			err: fmt.Errorf("invalid proxy %q: %w", proxyutil.Redact(proxyURL), errBuild),
+		}
+		return httpClient
 	}
 
 	// Priority 3: Use RoundTripper from context (typically from RoundTripperFor)
@@ -545,7 +554,12 @@ func NewDevinHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxya
 	tr, err := devinTransportCache.Get(proxyURL, func() (*http.Transport, error) {
 		var base *http.Transport
 		if proxyURL != "" {
-			base = buildProxyTransport(proxyURL)
+			built, _, errBuild := proxyutil.BuildHTTPTransport(proxyURL)
+			if errBuild != nil {
+				log.Errorf("devin proxy client: %v", errBuild)
+				return nil, fmt.Errorf("devin: invalid proxy %q: %w", proxyutil.Redact(proxyURL), errBuild)
+			}
+			base = built
 		}
 		if base == nil {
 			if dt, ok := http.DefaultTransport.(*http.Transport); ok {
@@ -557,7 +571,21 @@ func NewDevinHTTPClient(ctx context.Context, cfg *config.Config, auth *cliproxya
 		base.DisableCompression = true
 		return base, nil
 	})
-	if err != nil || tr == nil {
+	if err != nil {
+		return &http.Client{
+			Transport: failingProxyRoundTripper{err: err},
+			Timeout:   timeout,
+		}
+	}
+	if tr == nil {
+		if proxyURL != "" {
+			return &http.Client{
+				Transport: failingProxyRoundTripper{
+					err: fmt.Errorf("devin: proxy %q produced no transport", proxyutil.Redact(proxyURL)),
+				},
+				Timeout: timeout,
+			}
+		}
 		tr = &http.Transport{DisableCompression: true}
 	}
 
