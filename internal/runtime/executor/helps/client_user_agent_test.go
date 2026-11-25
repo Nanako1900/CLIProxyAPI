@@ -21,7 +21,9 @@ func TestConfiguredUserAgentPrecedenceAndScope(t *testing.T) {
 	}{
 		{"codex OAuth uses UALab", "codex", "", "", "configured-codex/1.0"},
 		{"codex API key uses UALab", "codex", "secret", "", "configured-codex/1.0"},
-		{"codex ignores legacy credential override", "codex", "secret", "credential/2.0", "configured-codex/1.0"},
+		{"codex credential override", "codex", "secret", "credential/2.0", "credential/2.0"},
+		{"codex ignores auto credential override", "codex", "secret", "auto", "configured-codex/1.0"},
+		{"codex ignores template credential override", "codex", "secret", "$X-Test-Identity", "configured-codex/1.0"},
 		{"claude shared", "claude", "secret", "", "configured-claude/1.0"},
 		{"claude credential", "claude", "secret", "credential/2.0", "credential/2.0"},
 		{"mapped claude credential", "claude", "secret", "$X-Test-Identity", "mapped/3.0"},

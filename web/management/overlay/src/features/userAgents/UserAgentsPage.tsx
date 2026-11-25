@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
@@ -14,9 +13,11 @@ import {
   userAgentPanelConnection,
   userAgentChanges,
   validateUserAgentDraft,
+  type AuthFileCredentialOption,
   type UserAgentDraft,
   type UserAgentSnapshot,
 } from '@/services/api/userAgentPanel';
+import { CredentialUAOverrides } from './CredentialUAOverrides';
 import { UserAgentSettings } from './UserAgentSettings';
 import { UserAgentRules } from './UserAgentRules';
 import styles from './UserAgentsPage.module.scss';
@@ -45,6 +46,7 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
   const [notice, setNotice] = useState('');
   const [review, setReview] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [credentials, setCredentials] = useState<AuthFileCredentialOption[]>([]);
   const [loadedAt, setLoadedAt] = useState('');
   const [catalogRevision, setCatalogRevision] = useState(0);
   const alive = useRef(false);
@@ -99,10 +101,14 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
     setLoading(true);
     setError('');
     try {
-      const next = await connection.load();
+      const [next, nextCredentials] = await Promise.all([
+        connection.load(),
+        connection.listCredentials(),
+      ]);
       if (!alive.current || request !== generation.current) return;
       setSnapshot(next);
       setDraft(structuredClone(next.draft));
+      setCredentials(nextCredentials);
       setLoadedAt(new Date().toISOString());
     } catch (failure) {
       if (alive.current && request === generation.current) reportError(failure);
@@ -438,34 +444,20 @@ function UserAgentWorkspace({ connected }: { connected: boolean }) {
           <p className={styles.muted}>{t('ua_panel.catalog_hint')}</p>
         </Card>
       )}
-      {runtime && !ualabOnly && (
-        <Card
-          title={t('ua_panel.credential_overrides')}
-          extra={<Link to="/auth-files">{t('ua_panel.open_credentials')}</Link>}
-        >
-          <div className={styles.stack}>
-            <p className={styles.muted}>{t('ua_panel.overrides_hint')}</p>
-            {!runtime.overrideInventoryAvailable ? (
-              <p>{t('ua_panel.inventory_unavailable')}</p>
-            ) : !overrides.length ? (
-              <p>{t('ua_panel.no_overrides')}</p>
-            ) : (
-              overrides.map((item, index) => (
-                <div className={styles.override} key={`${item.authIndex}-${index}`}>
-                  <div>
-                    <strong>{item.name || item.authIndex || t('ua_panel.credential')}</strong> ·{' '}
-                    {t('ua_panel.source_' + item.source)}
-                    {item.disabled && ` · ${t('ua_panel.disabled')}`}
-                  </div>
-                  <code>{item.userAgent}</code>
-                  <small className={styles.muted}>
-                    {t('ua_panel.credential_index')}: {item.authIndex || '—'}
-                  </small>
-                </div>
-              ))
-            )}
-          </div>
-        </Card>
+      {runtime && (provider === 'claude' || provider === 'codex') && (
+        <CredentialUAOverrides
+          provider={provider}
+          overrides={overrides}
+          credentials={credentials}
+          inventoryAvailable={runtime.overrideInventoryAvailable}
+          disabled={disabled}
+          onSaveOverride={async (fileName, headers) => {
+            await connection.saveCredentialOverride(fileName, headers);
+            if (!alive.current) return;
+            setNotice('saved');
+            await load();
+          }}
+        />
       )}
       {!ualabOnly && <UserAgentRules provider={provider} />}
       {draft && (

@@ -207,8 +207,53 @@
   border-top: 1px solid var(--border-color);
   padding: 14px 0;
 }
+.overrideHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.overrideExtras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.overrideExtras code {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+}
 .override code {
   overflow-wrap: anywhere;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.field span {
+  font-weight: 550;
+}
+.input,
+.select,
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: inherit;
+}
+.textarea {
+  font-family: $font-mono;
+  font-size: 12px;
+  resize: vertical;
 }
 .saveBar {
   position: sticky;

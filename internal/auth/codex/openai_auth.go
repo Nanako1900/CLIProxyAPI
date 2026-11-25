@@ -94,6 +94,20 @@ func NewCodexAuthWithProxyURL(cfg *config.Config, proxyURL string) *CodexAuth {
 	}
 }
 
+// SetUserAgent overrides the User-Agent sent on Codex OAuth2 / SIWC token
+// requests (e.g. when a specific credential pins its own Codex UALab UA).
+// Invalid values or "auto" are ignored.
+func (o *CodexAuth) SetUserAgent(userAgent string) {
+	if o == nil {
+		return
+	}
+	ua := strings.TrimSpace(userAgent)
+	if ua == "" || strings.EqualFold(ua, "auto") || !config.ValidUserAgent(ua) {
+		return
+	}
+	o.userAgent = ua
+}
+
 // applyOAuthUserAgent applies the operator's configured Codex UALab User-Agent
 // (or suppresses Go's default "Go-http-client/1.1" when unconfigured).
 func (o *CodexAuth) applyOAuthUserAgent(req *http.Request) {

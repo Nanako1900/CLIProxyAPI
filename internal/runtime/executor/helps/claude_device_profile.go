@@ -665,6 +665,26 @@ func DefaultClaudeVersion(cfg *config.Config) string {
 	return "2.1.321"
 }
 
+// ResolveClaudeBillingVersion returns the cc_version value to embed in
+// x-anthropic-billing-header for the given credential. If the credential sets a
+// static per-account header:User-Agent override carrying a valid Claude CLI
+// semver (e.g. "claude-cli/2.1.331 (external, sdk-cli)"), that version is used
+// so HTTP headers and request body stay strictly aligned without altering global
+// defaults for existing accounts. Otherwise it falls back to DefaultClaudeVersion(cfg).
+func ResolveClaudeBillingVersion(cfg *config.Config, auth *cliproxyauth.Auth) string {
+	if auth != nil {
+		if raw := strings.TrimSpace(ConfiguredCredentialUserAgent(auth)); raw != "" &&
+			!strings.EqualFold(raw, "auto") &&
+			!strings.HasPrefix(raw, "$") &&
+			!strings.Contains(strings.ToUpper(raw), "$CPA-SESSION-ID") {
+			if version, ok := parseClaudeCLIVersion(raw); ok {
+				return strconv.Itoa(version.major) + "." + strconv.Itoa(version.minor) + "." + strconv.Itoa(version.patch)
+			}
+		}
+	}
+	return DefaultClaudeVersion(cfg)
+}
+
 func ApplyClaudeDefaultDeviceProfileHeaders(r *http.Request, cfg *config.Config) {
 	ApplyClaudeDeviceProfileHeaders(r, defaultClaudeDeviceProfile(cfg))
 }

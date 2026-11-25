@@ -19,12 +19,13 @@ func (h *Handler) ClientUserAgentStatus(c *gin.Context) {
 		return
 	}
 	type override struct {
-		Provider  string `json:"provider"`
-		AuthIndex string `json:"authIndex"`
-		Name      string `json:"name"`
-		Source    string `json:"source"`
-		UserAgent string `json:"userAgent"`
-		Disabled  bool   `json:"disabled"`
+		Provider  string            `json:"provider"`
+		AuthIndex string            `json:"authIndex"`
+		Name      string            `json:"name"`
+		Source    string            `json:"source"`
+		UserAgent string            `json:"userAgent"`
+		Headers   map[string]string `json:"headers,omitempty"`
+		Disabled  bool              `json:"disabled"`
 	}
 	overrides := make([]override, 0)
 	if h.authManager != nil {
@@ -42,7 +43,15 @@ func (h *Handler) ClientUserAgentStatus(c *gin.Context) {
 			if label == "" || (provider == "gemini" && source == "credential") {
 				label = auth.Index
 			}
-			overrides = append(overrides, override{provider, auth.Index, label, source, value, auth.Disabled})
+			overrides = append(overrides, override{
+				Provider:  provider,
+				AuthIndex: auth.Index,
+				Name:      label,
+				Source:    source,
+				UserAgent: value,
+				Headers:   credentialIdentityOverrideHeaders(provider, auth, value),
+				Disabled:  auth.Disabled,
+			})
 		}
 	}
 	sort.Slice(overrides, func(i, j int) bool {
@@ -90,4 +99,58 @@ func credentialUserAgentOverride(auth *coreauth.Auth) (provider, value string) {
 		return "codex", helps.CodexCredentialUserAgent(auth)
 	}
 	return "", ""
+}
+
+// credentialIdentityOverrideHeaders returns only non-secret, provider-whitelisted
+// identity headers configured on auth so the management UI can inspect and edit
+// per-account UA overrides without ever exposing Authorization, Cookie, or keys.
+func credentialIdentityOverrideHeaders(provider string, auth *coreauth.Auth, resolvedUA string) map[string]string {
+	if auth == nil || len(auth.Attributes) == 0 {
+		return nil
+	}
+	var allowed map[string]string
+	switch provider {
+	case "claude":
+		allowed = map[string]string{
+			"user-agent":                  "User-Agent",
+			"x-stainless-package-version": "X-Stainless-Package-Version",
+			"x-stainless-runtime-version": "X-Stainless-Runtime-Version",
+			"x-stainless-os":              "X-Stainless-OS",
+			"x-stainless-arch":            "X-Stainless-Arch",
+			"x-stainless-timeout":         "X-Stainless-Timeout",
+		}
+	case "codex":
+		allowed = map[string]string{
+			"user-agent":            "User-Agent",
+			"originator":            "Originator",
+			"x-codex-beta-features": "X-Codex-Beta-Features",
+			"accept-encoding":       "Accept-Encoding",
+		}
+	default:
+		return nil
+	}
+	out := make(map[string]string)
+	for key, raw := range auth.Attributes {
+		prefix, name, ok := strings.Cut(key, ":")
+		if !ok || !strings.EqualFold(prefix, "header") {
+			continue
+		}
+		canonical, okAllowed := allowed[strings.ToLower(strings.TrimSpace(name))]
+		if !okAllowed {
+			continue
+		}
+		val := strings.TrimSpace(raw)
+		if val == "" {
+			continue
+		}
+		if canonical == "User-Agent" && resolvedUA != "" {
+			out[canonical] = resolvedUA
+			continue
+		}
+		out[canonical] = val
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

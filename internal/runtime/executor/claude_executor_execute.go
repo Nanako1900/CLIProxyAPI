@@ -236,7 +236,7 @@ func (e *ClaudeExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	cchBilling := ""
 	if cchSigning {
 		if !claudeCodeDetection.HelperProfile || claudeBodyNeedsBillingFallbackDoc(doc) {
-			cchBilling = claudeCCHFallbackBillingHeaderDoc(ctx, e.cfg, doc, claudeCodeDetection.Entrypoint)
+			cchBilling = claudeCCHFallbackBillingHeaderDoc(ctx, e.cfg, auth, doc, claudeCodeDetection.Entrypoint)
 		}
 		err = ensureClaudeBillingHeaderCCHPlaceholderDoc(doc, cchBilling)
 		if err != nil {

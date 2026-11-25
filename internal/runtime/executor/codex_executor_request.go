@@ -141,7 +141,7 @@ func (e *CodexExecutor) PrepareRequest(req *http.Request, auth *cliproxyauth.Aut
 		req.Header.Del("Authorization")
 	}
 	util.ApplyCustomHeadersFromAttrs(req, filterCodexAttrs(auth))
-	helps.ApplyCodexUALabHeaders(req.Header, e.cfg)
+	helps.ApplyCodexUALabHeadersForAuth(req.Header, e.cfg, auth)
 	alignCodexContentEncoding(req)
 	return nil
 }
@@ -593,7 +593,7 @@ func applyCodexHeadersWithSIWC(r *http.Request, auth *cliproxyauth.Auth, useSIWC
 		}
 	}
 	util.ApplyCustomHeadersFromAttrs(r, filterCodexAttrs(auth), ginHeaders)
-	helps.ApplyCodexUALabHeaders(r.Header, cfg)
+	helps.ApplyCodexUALabHeadersForAuth(r.Header, cfg, auth)
 }
 
 const codexRoutingHintHeader = "X-Codex-Routing-Hint"
