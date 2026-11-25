@@ -448,13 +448,13 @@ func TestMediaCredentialNameUsesSafeIdentity(t *testing.T) {
 func TestProxyURLForAuthPrefersCredentialOverride(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.ProxyURL = "http://global.example:8080"
-	if got := proxyURLForAuth(cfg, &auth.Auth{ProxyURL: "socks5://credential.example:1080"}); got != "socks5://credential.example:1080" {
+	if got := proxyURLForAuth(context.Background(), cfg, &auth.Auth{ProxyURL: "socks5://credential.example:1080"}); got != "socks5://credential.example:1080" {
 		t.Fatalf("effective proxy URL = %q, want credential override", got)
 	}
-	if got := proxyURLForAuth(cfg, &auth.Auth{}); got != "http://global.example:8080" {
+	if got := proxyURLForAuth(context.Background(), cfg, &auth.Auth{}); got != "http://global.example:8080" {
 		t.Fatalf("effective proxy URL = %q, want global fallback", got)
 	}
-	if got := proxyURLForAuth(cfg, &auth.Auth{ProxyURL: "direct"}); got != "direct" {
+	if got := proxyURLForAuth(context.Background(), cfg, &auth.Auth{ProxyURL: "direct"}); got != "direct" {
 		t.Fatalf("effective proxy URL = %q, want explicit direct override", got)
 	}
 }

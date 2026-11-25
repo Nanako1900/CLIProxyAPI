@@ -367,8 +367,7 @@ func (s *Server) codexAlphaSearch(c *gin.Context) {
 	baseHeaders := make(http.Header)
 	baseHeaders.Set("Content-Type", "application/json")
 	baseHeaders.Set("Accept", "application/json")
-	baseHeaders.Set("Originator", "codex_cli_rs")
-	for _, name := range []string{"Version", "User-Agent", "Session_id", "X-Client-Request-Id"} {
+	for _, name := range []string{"Version", "Session_id", "X-Client-Request-Id"} {
 		if value := strings.TrimSpace(c.GetHeader(name)); value != "" {
 			baseHeaders.Set(name, value)
 		}
@@ -404,6 +403,10 @@ func (s *Server) codexAlphaSearch(c *gin.Context) {
 		req, errRequest := s.handlers.AuthManager.NewHttpRequest(ctx, current, http.MethodPost, upstreamURL, requestBody, headers)
 		if errRequest != nil {
 			return nil, errRequest
+		}
+		helps.ApplyCodexUALabHeadersForAuth(req.Header, s.getConfig(), current)
+		if strings.TrimSpace(req.Header.Get("User-Agent")) == "" {
+			req.Header.Set("User-Agent", "")
 		}
 		authType, authValue := current.AccountInfo()
 		helps.RecordAPIRequest(ctx, s.getConfig(), helps.UpstreamRequestLog{

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gorilla/websocket"
@@ -128,5 +129,38 @@ func TestWebsocketCompressionRoundTrip(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestProxyAwareWebsocketDialerInvalidProxyFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	var upstreamHit atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHit.Store(true)
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err == nil {
+			_ = conn.Close()
+		}
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	dialer := newProxyAwareWebsocketDialer(
+		context.Background(),
+		&config.Config{},
+		&cliproxyauth.Auth{ProxyURL: "invalid-scheme://127.0.0.1:9999"},
+	)
+	conn, resp, err := dialer.DialContext(context.Background(), wsURL, nil)
+	if err == nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		_ = conn.Close()
+		t.Fatal("expected websocket dial with invalid proxy to fail closed, got nil error")
+	}
+	if upstreamHit.Load() {
+		t.Fatal("websocket server was contacted directly after invalid proxy configuration (IP leak)")
 	}
 }
