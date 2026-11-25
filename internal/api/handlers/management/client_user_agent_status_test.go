@@ -114,3 +114,67 @@ func TestClaudeAPIKeyUserAgentStatusMatchesDuplicateHeaders(t *testing.T) {
 		})
 	}
 }
+
+func TestClientUserAgentStatusExposesSafePerAccountHeadersAndCodexOverrides(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	manager := coreauth.NewManager(nil, nil, nil)
+	defer manager.StopQuotaShadow()
+
+	for _, auth := range []*coreauth.Auth{
+		{
+			ID:       "claude-new.json",
+			Provider: "claude",
+			Label:    "Claude New",
+			Attributes: map[string]string{
+				"header:User-Agent":                  "claude-cli/2.1.331 (external, sdk-cli)",
+				"header:X-Stainless-Package-Version": "0.128.0",
+				"header:Authorization":               "Bearer secret-claude-token",
+				"header:Cookie":                      "secret-cookie=1",
+			},
+		},
+		{
+			ID:       "codex-new.json",
+			Provider: "codex",
+			Label:    "Codex New",
+			Attributes: map[string]string{
+				"header:User-Agent":            "codex-tui/0.172.0 (Mac OS 27.3.0; arm64)",
+				"header:Originator":            "codex_tui",
+				"header:X-Codex-Beta-Features": "js_repl",
+				"header:Authorization":         "Bearer secret-codex-token",
+			},
+		},
+	} {
+		if _, errRegister := manager.Register(context.Background(), auth); errRegister != nil {
+			t.Fatal(errRegister)
+		}
+	}
+
+	h := &Handler{cfg: &config.Config{}, authManager: manager}
+	router := gin.New()
+	router.GET("/status", h.ClientUserAgentStatus)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	body := response.Body.String()
+	for _, secret := range []string{"secret-claude-token", "secret-codex-token", "secret-cookie", "claude-new.json", "codex-new.json"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("response leaked excluded value %q", secret)
+		}
+	}
+	value := ojson.ParseBytes(response.Body.Bytes())
+	overrides := value.Get("overrides").Array()
+	if len(overrides) != 2 {
+		t.Fatalf("overrides count = %d, want 2; body = %s", len(overrides), body)
+	}
+	if overrides[0].Get("provider").String() != "claude" ||
+		overrides[0].Get("headers.X-Stainless-Package-Version").String() != "0.128.0" {
+		t.Fatalf("unexpected claude override entry: %s", overrides[0].Raw)
+	}
+	if overrides[1].Get("provider").String() != "codex" ||
+		overrides[1].Get("headers.Originator").String() != "codex_tui" ||
+		overrides[1].Get("headers.X-Codex-Beta-Features").String() != "js_repl" {
+		t.Fatalf("unexpected codex override entry: %s", overrides[1].Raw)
+	}
+}

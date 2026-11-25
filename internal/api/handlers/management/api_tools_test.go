@@ -1758,3 +1758,85 @@ func TestAPICallInvalidProxyFailsClosedWithoutDirectLeak(t *testing.T) {
 		})
 	}
 }
+
+func TestAPICallCodexPerAccountOverrideIsolatesNewAccountFromOldAccount(t *testing.T) {
+	t.Parallel()
+
+	const globalUA = "codex-tui/0.160.0 (Mac OS 26.0.0; arm64) Apple_Terminal/480 (codex-tui; 0.160.0)"
+	const newUA = "codex-tui/0.172.0 (Mac OS 27.3.0; arm64) Apple_Terminal/489.11 (codex-tui; 0.172.0)"
+
+	var lastUA, lastOriginator string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastUA = r.Header.Get("User-Agent")
+		lastOriginator = r.Header.Get("Originator")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	manager := coreauth.NewManager(nil, nil, nil)
+	oldAuth := &coreauth.Auth{
+		ID:       "codex-old@example.com.json",
+		Provider: "codex",
+		Metadata: map[string]any{"type": "codex", "access_token": "tok-old"},
+	}
+	newAuth := &coreauth.Auth{
+		ID:       "codex-new@example.com.json",
+		Provider: "codex",
+		Metadata: map[string]any{"type": "codex", "access_token": "tok-new"},
+		Attributes: map[string]string{
+			"header:User-Agent": newUA,
+			"header:Originator": "codex_tui_new",
+		},
+	}
+	if _, err := manager.Register(context.Background(), oldAuth); err != nil {
+		t.Fatalf("register oldAuth: %v", err)
+	}
+	if _, err := manager.Register(context.Background(), newAuth); err != nil {
+		t.Fatalf("register newAuth: %v", err)
+	}
+	oldIdx := oldAuth.EnsureIndex()
+	newIdx := newAuth.EnsureIndex()
+
+	h := &Handler{
+		cfg: &config.Config{
+			CodexHeaderDefaults: config.CodexHeaderDefaults{
+				UserAgent:  globalUA,
+				Originator: "codex_tui_old",
+			},
+		},
+		authManager: manager,
+	}
+	router := gin.New()
+	router.POST("/", h.APICall)
+
+	callFor := func(authIdx string) {
+		t.Helper()
+		payloadBytes, _ := json.Marshal(map[string]any{
+			"authIndex": authIdx,
+			"method":    "GET",
+			"url":       upstream.URL + "/backend-api/wham/usage",
+			"header": map[string]string{
+				"Authorization": "Bearer $TOKEN$",
+				"User-Agent":    "codex-tui/0.149.1 (stale)",
+			},
+		})
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payloadBytes))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", recorder.Code, recorder.Body.String())
+		}
+	}
+
+	callFor(oldIdx)
+	if lastUA != globalUA || lastOriginator != "codex_tui_old" {
+		t.Fatalf("old account got UA=%q Originator=%q, want global %q / codex_tui_old", lastUA, lastOriginator, globalUA)
+	}
+
+	callFor(newIdx)
+	if lastUA != newUA || lastOriginator != "codex_tui_new" {
+		t.Fatalf("new account got UA=%q Originator=%q, want %q / codex_tui_new", lastUA, lastOriginator, newUA)
+	}
+}

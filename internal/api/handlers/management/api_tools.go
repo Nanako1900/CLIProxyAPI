@@ -1014,8 +1014,8 @@ func applyAPICallProviderHeaders(req *http.Request, provider string, cfg *config
 	}
 	switch provider {
 	case "codex":
-		if cfg != nil && helps.ResolveCodexUserAgent(cfg) != "" {
-			helps.ApplyCodexUALabHeaders(req.Header, cfg)
+		if helps.ResolveCodexUserAgentForAuth(cfg, auth) != "" {
+			helps.ApplyCodexUALabHeadersForAuth(req.Header, cfg, auth)
 		} else if strings.TrimSpace(req.Header.Get("User-Agent")) == "" {
 			req.Header.Set("User-Agent", "")
 		}

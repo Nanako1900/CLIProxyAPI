@@ -501,7 +501,7 @@ func claudeBillingFingerprintMessageTextDoc(doc *ojson.Doc) string {
 	return ""
 }
 
-func claudeCCHFallbackBillingHeader(ctx context.Context, cfg *config.Config, payload []byte, entrypoint string) string {
+func claudeCCHFallbackBillingHeader(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, payload []byte, entrypoint string) string {
 	isProbeOrHelper := helps.IsClaudeProbeOrHelperRequest(payload)
 	prevReq, promptID := helps.ExtractClaudeBillingTags(payload)
 	if !isProbeOrHelper {
@@ -517,7 +517,7 @@ func claudeCCHFallbackBillingHeader(ctx context.Context, cfg *config.Config, pay
 	isSubagent := helps.IsClaudeSubagentRequest(incomingHeaders, payload)
 	return generateBillingHeader(
 		true,
-		helps.DefaultClaudeVersion(cfg),
+		helps.ResolveClaudeBillingVersion(cfg, auth),
 		claudeBillingFingerprintMessageText(payload),
 		entrypoint,
 		getWorkloadFromContext(ctx),
@@ -527,7 +527,7 @@ func claudeCCHFallbackBillingHeader(ctx context.Context, cfg *config.Config, pay
 	)
 }
 
-func claudeCCHFallbackBillingHeaderDoc(ctx context.Context, cfg *config.Config, doc *ojson.Doc, entrypoint string) string {
+func claudeCCHFallbackBillingHeaderDoc(ctx context.Context, cfg *config.Config, auth *cliproxyauth.Auth, doc *ojson.Doc, entrypoint string) string {
 	isProbeOrHelper := isClaudeProbeOrHelperRequestDoc(doc)
 	prevReq, promptID := extractClaudeBillingTagsDoc(doc)
 	if !isProbeOrHelper {
@@ -543,7 +543,7 @@ func claudeCCHFallbackBillingHeaderDoc(ctx context.Context, cfg *config.Config, 
 	isSubagent := isClaudeSubagentRequestDoc(incomingHeaders, doc)
 	return generateBillingHeader(
 		true,
-		helps.DefaultClaudeVersion(cfg),
+		helps.ResolveClaudeBillingVersion(cfg, auth),
 		claudeBillingFingerprintMessageTextDoc(doc),
 		entrypoint,
 		getWorkloadFromContext(ctx),
@@ -2708,7 +2708,7 @@ func applyCloakingInternalDoc(
 		}
 	}
 
-	billingVersion := helps.DefaultClaudeVersion(cfg)
+	billingVersion := helps.ResolveClaudeBillingVersion(cfg, auth)
 	workload := getWorkloadFromContext(ctx)
 
 	isProbeOrHelper := isClaudeProbeOrHelperRequestDoc(doc)

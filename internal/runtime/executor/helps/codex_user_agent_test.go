@@ -67,13 +67,11 @@ func TestApplyCodexUALabHeadersAndWireOrder(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer test-token")
 	req.Header.Set("Connection", "Keep-Alive")
 
-	authWithLegacyUA := &cliproxyauth.Auth{
+	// Account without per-credential UA inherits the global UALab profile verbatim.
+	existingAuth := &cliproxyauth.Auth{
 		Provider: "codex",
-		Attributes: map[string]string{
-			"header:User-Agent": "legacy-override/1.0",
-		},
 	}
-	ApplyConfiguredUserAgent(context.Background(), req.Header, cfg, authWithLegacyUA, "codex", nil)
+	ApplyConfiguredUserAgent(context.Background(), req.Header, cfg, existingAuth, "codex", nil)
 
 	if got := req.Header.Get("User-Agent"); got != codexUA {
 		t.Fatalf("User-Agent = %q, want %q", got, codexUA)
@@ -329,5 +327,120 @@ func TestResolveClaudeEffectiveUserAgent(t *testing.T) {
 	gotAuto := ResolveClaudeEffectiveUserAgent(autoCfg, nil)
 	if gotAuto == "" || strings.EqualFold(gotAuto, "auto") {
 		t.Fatalf("auto UA = %q, want resolved Claude CLI UA", gotAuto)
+	}
+}
+
+func TestResolveClaudeBillingVersionFollowsPerAccountOverride(t *testing.T) {
+	t.Parallel()
+
+	globalCfg := &config.Config{
+		ClaudeHeaderDefaults: config.ClaudeHeaderDefaults{
+			UserAgent: "claude-cli/2.1.319 (external, cli)",
+		},
+	}
+
+	// Existing account without per-account override keeps global cc_version.
+	if got := ResolveClaudeBillingVersion(globalCfg, &cliproxyauth.Auth{Provider: "claude"}); got != "2.1.319" {
+		t.Fatalf("existing account billing version = %q, want 2.1.319", got)
+	}
+
+	// New account with per-account UA override aligns cc_version to 2.1.331 without touching global config.
+	newAccount := &cliproxyauth.Auth{
+		Provider: "claude",
+		Attributes: map[string]string{
+			"header:User-Agent": "claude-cli/2.1.331 (external, sdk-cli)",
+		},
+	}
+	if got := ResolveClaudeBillingVersion(globalCfg, newAccount); got != "2.1.331" {
+		t.Fatalf("new account billing version = %q, want 2.1.331", got)
+	}
+
+	// "auto" or template variables on credential fall back safely to global version.
+	for _, raw := range []string{"auto", "$X-Client-UA", "$CPA-SESSION-ID"} {
+		auth := &cliproxyauth.Auth{
+			Provider:   "claude",
+			Attributes: map[string]string{"header:User-Agent": raw},
+		}
+		if got := ResolveClaudeBillingVersion(globalCfg, auth); got != "2.1.319" {
+			t.Fatalf("fallback for %q = %q, want 2.1.319", raw, got)
+		}
+	}
+}
+
+func TestCodexPerAccountUALabOverridePreservesGlobalAccounts(t *testing.T) {
+	t.Parallel()
+
+	const globalUA = "codex-tui/0.160.0 (Mac OS 26.0.0; arm64) Apple_Terminal/480 (codex-tui; 0.160.0)"
+	const newAccountUA = "codex-tui/0.172.0 (Mac OS 27.3.0; arm64) Apple_Terminal/489.11 (codex-tui; 0.172.0)"
+
+	cfg := &config.Config{
+		CodexHeaderDefaults: config.CodexHeaderDefaults{
+			UserAgent:      globalUA,
+			Originator:     "codex_tui_old",
+			BetaFeatures:   "old_beta",
+			AcceptEncoding: "gzip",
+		},
+	}
+
+	oldAuth := &cliproxyauth.Auth{Provider: "codex"}
+	newAuth := &cliproxyauth.Auth{
+		Provider: "codex",
+		Attributes: map[string]string{
+			"header:User-Agent":            newAccountUA,
+			"header:Originator":            "codex_tui_new",
+			"header:X-Codex-Beta-Features": "js_repl,apps",
+			"header:Accept-Encoding":       "zstd,gzip",
+		},
+	}
+	autoAuth := &cliproxyauth.Auth{
+		Provider:   "codex",
+		Attributes: map[string]string{"header:User-Agent": "auto"},
+	}
+
+	if got := CodexCredentialUserAgent(oldAuth); got != "" {
+		t.Fatalf("CodexCredentialUserAgent(oldAuth) = %q, want empty", got)
+	}
+	if got := CodexCredentialUserAgent(autoAuth); got != "" {
+		t.Fatalf("CodexCredentialUserAgent(autoAuth) = %q, want empty", got)
+	}
+	if got := CodexCredentialUserAgent(newAuth); got != newAccountUA {
+		t.Fatalf("CodexCredentialUserAgent(newAuth) = %q, want %q", got, newAccountUA)
+	}
+
+	// Old account keeps global UA & identity headers untouched.
+	oldHeaders := http.Header{}
+	ApplyConfiguredUserAgent(context.Background(), oldHeaders, cfg, oldAuth, "codex", nil)
+	if oldHeaders.Get("User-Agent") != globalUA || oldHeaders.Get("Originator") != "codex_tui_old" ||
+		oldHeaders.Get("X-Codex-Beta-Features") != "old_beta" || oldHeaders.Get("Accept-Encoding") != "gzip" {
+		t.Fatalf("old account headers mutated: %+v", oldHeaders)
+	}
+
+	// New account gets its own per-account UALab headers on both HTTP and WebSocket.
+	newHeaders := http.Header{}
+	ApplyConfiguredUserAgent(context.Background(), newHeaders, cfg, newAuth, "codex", nil)
+	if newHeaders.Get("User-Agent") != newAccountUA || newHeaders.Get("Originator") != "codex_tui_new" ||
+		newHeaders.Get("X-Codex-Beta-Features") != "js_repl,apps" || newHeaders.Get("Accept-Encoding") != "zstd,gzip" {
+		t.Fatalf("new account HTTP headers mismatch: %+v", newHeaders)
+	}
+
+	wsHeaders := http.Header{}
+	ApplyCodexUALabWebsocketHeadersForAuth(wsHeaders, cfg, newAuth)
+	if wsHeaders.Get("User-Agent") != newAccountUA || wsHeaders.Get("Originator") != "codex_tui_new" ||
+		wsHeaders.Get("X-Codex-Beta-Features") != "js_repl,apps" {
+		t.Fatalf("new account WS headers mismatch: %+v", wsHeaders)
+	}
+	if wsHeaders.Get("Accept-Encoding") != "" {
+		t.Fatalf("WS headers must not mutate Accept-Encoding, got %q", wsHeaders.Get("Accept-Encoding"))
+	}
+
+	// ResolveCodexUserAgentForAuth returns per-account UA for OAuth refresh and global for old/auto.
+	if got := ResolveCodexUserAgentForAuth(cfg, oldAuth); got != globalUA {
+		t.Fatalf("ResolveCodexUserAgentForAuth(old) = %q, want %q", got, globalUA)
+	}
+	if got := ResolveCodexUserAgentForAuth(cfg, autoAuth); got != globalUA {
+		t.Fatalf("ResolveCodexUserAgentForAuth(auto) = %q, want %q", got, globalUA)
+	}
+	if got := ResolveCodexUserAgentForAuth(cfg, newAuth); got != newAccountUA {
+		t.Fatalf("ResolveCodexUserAgentForAuth(new) = %q, want %q", got, newAccountUA)
 	}
 }

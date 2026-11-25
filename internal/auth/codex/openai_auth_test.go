@@ -473,3 +473,36 @@ func TestNewCodexAuthWithProxyURL_InvalidProxyFailsClosed(t *testing.T) {
 		t.Fatal("upstream was contacted directly after invalid proxy configuration (IP leak)")
 	}
 }
+
+func TestCodexAuthSetUserAgentOverridesGlobalForPerAccountRefresh(t *testing.T) {
+	resetCodexRefreshGroupForTest()
+	t.Cleanup(resetCodexRefreshGroupForTest)
+
+	const globalUA = "codex-tui/0.160.0 (Mac OS 26.0.0; arm64) Apple_Terminal/480 (codex-tui; 0.160.0)"
+	const perAccountUA = "codex-tui/0.172.0 (Mac OS 27.3.0; arm64) Apple_Terminal/489.11 (codex-tui; 0.172.0)"
+
+	var gotUA string
+	svc := NewCodexAuth(&config.Config{
+		CodexHeaderDefaults: config.CodexHeaderDefaults{UserAgent: globalUA},
+	})
+	svc.SetUserAgent("auto") // must be ignored
+	svc.SetUserAgent(perAccountUA)
+	svc.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			gotUA = req.Header.Get("User-Agent")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"access_token":"at","refresh_token":"rt","token_type":"Bearer","expires_in":3600}`)),
+				Header:     make(http.Header),
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	if _, err := svc.RefreshTokens(context.Background(), "per-account-ua-refresh"); err != nil {
+		t.Fatalf("RefreshTokens failed: %v", err)
+	}
+	if gotUA != perAccountUA {
+		t.Fatalf("RefreshTokens User-Agent = %q, want %q", gotUA, perAccountUA)
+	}
+}

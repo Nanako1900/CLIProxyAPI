@@ -338,6 +338,9 @@ func (e *CodexExecutor) refreshLocked(ctx context.Context, auth *cliproxyauth.Au
 	}
 
 	svc := codexauth.NewCodexAuthWithProxyURL(cfg, auth.ProxyURL)
+	if ua := helps.ResolveCodexUserAgentForAuth(cfg, auth); ua != "" {
+		svc.SetUserAgent(ua)
+	}
 	if diskPath != "" && (cfg == nil || cfg.AuthDir == "") {
 		svc.SetRefreshJournal(&codexauth.FileRefreshJournal{Dir: filepath.Dir(diskPath)})
 	}

@@ -152,7 +152,7 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 		betaHeader = codexResponsesWebsocketBetaHeaderValue
 	}
 	headers.Set("OpenAI-Beta", betaHeader)
-	helps.ApplyCodexUALabWebsocketHeaders(headers, cfg)
+	helps.ApplyCodexUALabWebsocketHeadersForAuth(headers, cfg, auth)
 	sessionFallback := ""
 	if strings.Contains(headers.Get("User-Agent"), "Mac OS") {
 		sessionFallback = uuid.NewString()
@@ -181,7 +181,7 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 
 	req := (&http.Request{Header: headers}).WithContext(ctx)
 	util.ApplyCustomHeadersFromAttrs(req, filterCodexAttrs(auth), ginHeaders)
-	helps.ApplyCodexUALabWebsocketHeaders(headers, cfg)
+	helps.ApplyCodexUALabWebsocketHeadersForAuth(headers, cfg, auth)
 
 	return headers
 }
