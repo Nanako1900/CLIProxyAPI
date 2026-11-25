@@ -1,10 +1,15 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import type { AxiosAdapter } from 'axios';
+import { apiClient } from '../src/services/api/client';
 import {
   buildCredentialOverrideClearPatch,
   buildCredentialOverrideSavePatch,
   parseUALabClaudeCredentialHeaders,
   parseUALabCodexCredentialHeaders,
+  userAgentPanelConnection,
 } from '../src/services/api/userAgentPanel';
+
+afterEach(() => mock.restore());
 
 describe('per-account UA/UALab credential overrides', () => {
   test('parses Claude UALab YAML into per-account headers and rejects auto', () => {
@@ -106,5 +111,88 @@ oauth:
       'X-Codex-Beta-Features': '',
       'Accept-Encoding': '',
     });
+  });
+
+  test('calls v8 /credentials and /credentials/fields endpoints on captured connection', async () => {
+    const calls: { method: string; baseURL?: string; url?: string; body?: unknown }[] = [];
+    const adapter: AxiosAdapter = async (request) => {
+      calls.push({
+        method: (request.method || '').toUpperCase(),
+        baseURL: request.baseURL,
+        url: request.url,
+        body: request.data ? JSON.parse(request.data) : undefined,
+      });
+      return {
+        data:
+          request.url === '/credentials'
+            ? {
+                files: [
+                  {
+                    auth_index: 'idx-1',
+                    name: 'claude-new.json',
+                    label: 'Claude New',
+                    provider: 'claude',
+                    disabled: false,
+                    runtime_only: false,
+                  },
+                  {
+                    auth_index: 'idx-rt',
+                    name: 'runtime-only.json',
+                    provider: 'claude',
+                    runtime_only: true,
+                  },
+                ],
+              }
+            : { status: 'ok' },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: request,
+      };
+    };
+
+    apiClient.setConfig({ apiBase: 'https://cpa.example/panel', managementKey: 'test-key' });
+    const client = apiClient.captureConnection();
+    spyOn(apiClient, 'captureConnection').mockReturnValue(client);
+    const get = client.get.bind(client);
+    const patch = client.patch.bind(client);
+    spyOn(client, 'get').mockImplementation((url, options) => get(url, { ...options, adapter }));
+    spyOn(client, 'patch').mockImplementation((url, body, options) =>
+      patch(url, body, { ...options, adapter })
+    );
+
+    const conn = userAgentPanelConnection();
+    const creds = await conn.listCredentials();
+    expect(creds).toEqual([
+      {
+        authIndex: 'idx-1',
+        name: 'claude-new.json',
+        label: 'Claude New',
+        provider: 'claude',
+        disabled: false,
+      },
+    ]);
+
+    await conn.saveCredentialOverride('claude-new.json', {
+      'User-Agent': 'claude-cli/2.1.331 (external, cli)',
+    });
+
+    expect(calls).toEqual([
+      {
+        method: 'GET',
+        baseURL: 'https://cpa.example/panel/v8/management',
+        url: '/credentials',
+        body: undefined,
+      },
+      {
+        method: 'PATCH',
+        baseURL: 'https://cpa.example/panel/v8/management',
+        url: '/credentials/fields',
+        body: {
+          name: 'claude-new.json',
+          headers: { 'User-Agent': 'claude-cli/2.1.331 (external, cli)' },
+        },
+      },
+    ]);
   });
 });
